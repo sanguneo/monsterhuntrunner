@@ -9,6 +9,8 @@ import type { EnemyProjShape } from '../data/worlds';
 const playerGeo = new THREE.SphereGeometry(0.16, 8, 8);
 const playerMat = new THREE.MeshBasicMaterial({ color: 0x7fd6ff });
 const critMat = new THREE.MeshBasicMaterial({ color: 0xffe066 });
+const tailGeo = new THREE.SphereGeometry(0.1, 8, 6);
+const tailMat = new THREE.MeshBasicMaterial({ color: 0xa7ffdc, transparent: true, opacity: 0.5 });
 
 const enemyGeos: Record<EnemyProjShape, THREE.BufferGeometry> = {
   ball: new THREE.SphereGeometry(0.26, 10, 8),
@@ -48,6 +50,12 @@ export class Projectile {
   ) {
     if (owner === 'player') {
       this.mesh = new THREE.Mesh(playerGeo, isCrit ? critMat : playerMat);
+      for (let i = 0; i < 3; i++) {
+        const tail = new THREE.Mesh(tailGeo, tailMat);
+        tail.position.z = -0.2 - i * 0.18;
+        tail.scale.setScalar(1 - i * 0.2);
+        this.mesh.add(tail);
+      }
       this.spin = false;
     } else {
       const shape = style.shape ?? 'rod';

@@ -152,6 +152,7 @@ export class Combat {
             proj.alive = false;
             game.hud.floatTextWorld(m.position.clone(), `${Math.round(proj.damage)}`, proj.isCrit ? 'crit' : 'dmg');
             game.sound.play('hitMonster');
+            game.effects.emit('hit', m.position);
             if (m.takeDamage(proj.damage)) game.onMonsterKilled(m);
             break;
           }
@@ -163,6 +164,7 @@ export class Combat {
             proj.alive = false;
             const dealt = game.boss.takeDamage(proj.damage);
             if (dealt > 0) {
+              game.effects.emit('hit', bossCenter);
               // 경직 중 데미지 숫자 확대·노란색 (§9.4)
               const cls = game.boss.staggered ? 'dmg-weak' : proj.isCrit ? 'crit' : 'dmg';
               game.hud.floatTextWorld(bossCenter, `${dealt}`, cls);
@@ -299,6 +301,7 @@ export class Combat {
     this.cooldowns.dash = this.cooldownMax.dash;
     this.dashReadyIdle = 0;
     game.sound.play('skillDash');
+    game.effects.emit('dash', game.player.position);
     return true;
   }
 
@@ -313,6 +316,7 @@ export class Combat {
   private castHealPulse(): boolean {
     const game = this.game;
     game.player.heal(CONFIG.skills.pool.healPulse.heal);
+    game.effects.emit('heal', game.player.position);
     game.hud.floatTextWorld(game.player.position.clone(), t('float.heal'), 'heal');
     // 주변 잡몹 약한 넉백
     for (const m of game.monsters) {
@@ -417,8 +421,8 @@ export class Combat {
   private spawnBlastFx(): void {
     const p = this.game.player;
     const mesh = new THREE.Mesh(ringGeo, ringMat.clone());
-    mesh.position.set(p.x, 1.0, p.z + 2);
-    mesh.rotation.y = Math.PI / 2;
+    mesh.position.set(p.x, 0.08, p.z + 2);
+    mesh.rotation.x = -Math.PI / 2;
     this.game.scene.add(mesh);
     this.fx.push({ mesh, life: 0.45 });
   }

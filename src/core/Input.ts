@@ -1,37 +1,42 @@
-// ============================================================
-// 키보드 + 터치 통합 입력 (§5, §13.2)
-// 입력 버퍼(0.15s) — 소비 측(Player/Combat)이 버퍼에서 꺼내 쓴다.
-// ============================================================
-
+// Keyboard and pointer input share one timestamped, consumable buffer.
 import { CONFIG } from '../data/config';
 
 export type Action = 'left' | 'right' | 'jump' | 'slide' | 'skill1' | 'skill2' | 'skill3' | 'skill4' | 'pause';
 
-interface BufferedAction {
-  action: Action;
-  time: number;
+export interface BufferedAction {
+  readonly action: Action;
+  readonly time: number;
 }
+
+type InputSurface = Pick<HTMLElement,
+  'addEventListener' | 'setPointerCapture' | 'hasPointerCapture' | 'releasePointerCapture'> & {
+  readonly style: Pick<CSSStyleDeclaration, 'touchAction'>;
+  getBoundingClientRect(): Pick<DOMRect, 'left' | 'width'>;
+};
+
+const KEY_ACTIONS: Readonly<Record<string, Action>> = {
+  ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right',
+  ArrowUp: 'jump', KeyW: 'jump', Space: 'jump', ArrowDown: 'slide', KeyS: 'slide',
+  KeyQ: 'skill1', KeyE: 'skill2', KeyR: 'skill3', KeyF: 'skill4', Escape: 'pause', KeyP: 'pause',
+};
 
 export class Input {
   private buffer: BufferedAction[] = [];
-  /** 즉시 콜백 (pause 등 UI성 입력) */
   onAction: ((a: Action) => void) | null = null;
+  private gesture: { id: number; x: number; y: number; time: number; fired: boolean } | null = null;
 
-  private touchStartX = 0;
-  private touchStartY = 0;
-  private touchStartTime = 0;
-  private touchActive = false;
-
-  constructor(private target: HTMLElement) {
+  constructor(private target: InputSurface) {
+    target.style.touchAction = 'none';
     window.addEventListener('keydown', (e) => this.onKeyDown(e));
-    target.addEventListener('touchstart', (e) => this.onTouchStart(e), { passive: false });
-    target.addEventListener('touchend', (e) => this.onTouchEnd(e), { passive: false });
-    target.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
+    window.addEventListener('blur', () => this.clear());
+    target.addEventListener('pointerdown', (e) => this.onPointerDown(e));
+    target.addEventListener('pointermove', (e) => this.onPointerMove(e));
+    target.addEventListener('pointerup', (e) => this.onPointerUp(e));
+    target.addEventListener('pointercancel', (e) => this.cancelPointer(e));
+    target.addEventListener('lostpointercapture', (e) => this.cancelPointer(e));
   }
 
-  private now(): number {
-    return performance.now() / 1000;
-  }
+  private now(): number { return performance.now() / 1000; }
 
   push(action: Action): void {
     this.buffer.push({ action, time: this.now() });
@@ -39,108 +44,84 @@ export class Input {
     this.onAction?.(action);
   }
 
-  /** 버퍼에서 해당 액션을 소비. maxAge(초) 내의 것만 인정. */
   consume(action: Action, maxAge: number = CONFIG.accessibility.inputBuffer): boolean {
-    const t = this.now();
-    for (let i = this.buffer.length - 1; i >= 0; i--) {
-      const b = this.buffer[i];
-      if (b.action === action && t - b.time <= maxAge) {
-        this.buffer.splice(i, 1);
-        return true;
-      }
-    }
-    return false;
+    return this.consumeEntry([action], maxAge) !== null;
   }
 
-  /** 주어진 액션들 중 가장 오래된(먼저 입력된) 유효 항목을 소비해 반환. */
-  consumeAny(actions: Action[], maxAge: number = CONFIG.accessibility.inputBuffer): Action | null {
-    const t = this.now();
-    for (let i = 0; i < this.buffer.length; i++) {
-      const b = this.buffer[i];
-      if (actions.includes(b.action) && t - b.time <= maxAge) {
-        this.buffer.splice(i, 1);
-        return b.action;
-      }
-    }
-    return null;
+  consumeAny(actions: readonly Action[], maxAge: number = CONFIG.accessibility.inputBuffer): Action | null {
+    return this.consumeEntry(actions, maxAge)?.action ?? null;
+  }
+
+  /** Keep the original age when intent moves into Player's landing queue. */
+  consumeEntry(actions: readonly Action[], maxAge: number = CONFIG.accessibility.inputBuffer): BufferedAction | null {
+    const now = this.now();
+    const index = this.buffer.findIndex((entry) => actions.includes(entry.action) && now - entry.time <= maxAge);
+    return index < 0 ? null : this.buffer.splice(index, 1)[0];
   }
 
   clear(): void {
     this.buffer = [];
+    this.clearGesture();
+  }
+
+  private clearGesture(): void {
+    const gesture = this.gesture;
+    this.gesture = null; // release can synchronously dispatch lostpointercapture
+    if (gesture && this.target.hasPointerCapture(gesture.id)) this.target.releasePointerCapture(gesture.id);
   }
 
   private onKeyDown(e: KeyboardEvent): void {
-    if (e.repeat) return;
-    switch (e.code) {
-      case 'ArrowLeft':
-      case 'KeyA':
-        this.push('left');
-        break;
-      case 'ArrowRight':
-      case 'KeyD':
-        this.push('right');
-        break;
-      case 'ArrowUp':
-      case 'KeyW':
-      case 'Space':
-        e.preventDefault();
-        this.push('jump');
-        break;
-      case 'ArrowDown':
-      case 'KeyS':
-        this.push('slide');
-        break;
-      case 'KeyQ':
-        this.push('skill1');
-        break;
-      case 'KeyE':
-        this.push('skill2');
-        break;
-      case 'KeyR':
-        this.push('skill3');
-        break;
-      case 'KeyF':
-        this.push('skill4');
-        break;
-      case 'Escape':
-      case 'KeyP':
-        this.push('pause');
-        break;
+    const target = e.target;
+    if (e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (target && 'closest' in target && typeof target.closest === 'function') {
+      if (target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])')) return;
+      // Space still activates a focused button; movement/pause shortcuts remain
+      // available after a pointer click on a HUD skill.
+      if (e.code === 'Space' && target.closest('button, a, [role="button"]')) return;
+    }
+    const action = KEY_ACTIONS[e.code];
+    if (!action) return;
+    e.preventDefault();
+    this.push(action);
+  }
+
+  private onPointerDown(e: PointerEvent): void {
+    if (!e.isPrimary || (this.gesture && this.gesture.id !== e.pointerId)) {
+      this.clearGesture();
+      return;
+    }
+    if (e.button !== 0) return;
+    e.preventDefault();
+    this.gesture = { id: e.pointerId, x: e.clientX, y: e.clientY, time: this.now(), fired: false };
+    this.target.setPointerCapture(e.pointerId);
+  }
+
+  private onPointerMove(e: PointerEvent): void {
+    const gesture = this.gesture;
+    if (!gesture || gesture.id !== e.pointerId || gesture.fired) return;
+    e.preventDefault();
+    const dx = e.clientX - gesture.x;
+    const dy = e.clientY - gesture.y;
+    if (Math.hypot(dx, dy) < 24) return;
+    gesture.fired = true;
+    this.push(Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : (dy < 0 ? 'jump' : 'slide'));
+  }
+
+  private onPointerUp(e: PointerEvent): void {
+    if (this.gesture?.id !== e.pointerId) return;
+    this.onPointerMove(e); // also handles a final coalesced displacement
+    const gesture = this.gesture;
+    if (!gesture) return; // onAction may clear input during a state transition
+    e.preventDefault();
+    this.clearGesture();
+    if (!gesture.fired && this.now() - gesture.time < 0.35) {
+      const rect = this.target.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      this.push(x < rect.width / 3 ? 'left' : x > rect.width * 2 / 3 ? 'right' : 'jump');
     }
   }
 
-  private onTouchStart(e: TouchEvent): void {
-    e.preventDefault();
-    const touch = e.changedTouches[0];
-    this.touchStartX = touch.clientX;
-    this.touchStartY = touch.clientY;
-    this.touchStartTime = this.now();
-    this.touchActive = true;
-  }
-
-  private onTouchEnd(e: TouchEvent): void {
-    e.preventDefault();
-    if (!this.touchActive) return;
-    this.touchActive = false;
-    const touch = e.changedTouches[0];
-    const dx = touch.clientX - this.touchStartX;
-    const dy = touch.clientY - this.touchStartY;
-    const dist = Math.hypot(dx, dy);
-    const SWIPE_MIN = 24;
-
-    if (dist >= SWIPE_MIN) {
-      // 스와이프: 주축 방향 판정
-      if (Math.abs(dx) > Math.abs(dy)) {
-        this.push(dx > 0 ? 'right' : 'left');
-      } else {
-        this.push(dy < 0 ? 'jump' : 'slide');
-      }
-    } else if (this.now() - this.touchStartTime < 0.35) {
-      // 탭: 레인 터치 (좌 1/3=좌, 우 1/3=우, 중앙=점프)
-      const w = window.innerWidth;
-      if (touch.clientX < w / 3) this.push('left');
-      else if (touch.clientX > (w * 2) / 3) this.push('right');
-      else this.push('jump');
-    }
+  private cancelPointer(e: PointerEvent): void {
+    if (this.gesture?.id === e.pointerId) this.clearGesture();
   }
 }

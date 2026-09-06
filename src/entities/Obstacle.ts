@@ -4,19 +4,23 @@
 // ============================================================
 
 import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { CONFIG, laneX } from '../data/config';
 import type { Player } from './Player';
 
 export type ObstacleType = 'LOW' | 'HIGH' | 'PIT' | 'BLOCK';
 
-const lowGeo = new THREE.BoxGeometry(1.7, 0.8, 0.6);
+const lowGeo = new RoundedBoxGeometry(1.7, 0.8, 0.6, 2, 0.12);
 const lowMat = new THREE.MeshStandardMaterial({ color: 0xb45309 });
-const highGeo = new THREE.BoxGeometry(1.8, 1.2, 0.6);
+const highGeo = new RoundedBoxGeometry(1.8, 1.2, 0.6, 2, 0.12);
 const highMat = new THREE.MeshStandardMaterial({ color: 0x7c3aed });
 const pitGeo = new THREE.PlaneGeometry(1.9, 2.4);
 const pitMat = new THREE.MeshBasicMaterial({ color: 0x050308 });
-const blockGeo = new THREE.BoxGeometry(1.9, 3.0, 0.8);
+const blockGeo = new RoundedBoxGeometry(1.9, 3.0, 0.8, 2, 0.16);
 const blockMat = new THREE.MeshStandardMaterial({ color: 0x57534e });
+const railGeo = new THREE.BoxGeometry(1, 1, 1);
+const trimMat = new THREE.MeshStandardMaterial({ color: 0xffdf99, roughness: 0.85 });
+const signMat = new THREE.MeshStandardMaterial({ color: 0xff987c, roughness: 0.8 });
 
 /** 월드 테마 색상 적용 — 스테이지마다 장애물 색이 달라진다 */
 export function applyObstacleTheme(colors: { obsLow: number; obsHigh: number; obsBlock: number }): void {
@@ -61,6 +65,32 @@ export class Obstacle {
         this.mesh.position.set(x, 1.5, z);
         this.zLen = 0.8;
         break;
+    }
+    this.mesh.name = `hazard-${type.toLowerCase()}`;
+    if (type === 'PIT') {
+      for (const side of [-1, 1]) {
+        const rim = new THREE.Mesh(railGeo, signMat);
+        rim.scale.set(0.09, 2.4, 0.07);
+        rim.position.set(side * 0.93, 0, 0.035);
+        this.mesh.add(rim);
+      }
+    } else {
+      // Repeated cream slats read as a hurdle, overhead beam, or tall gate.
+      const rows = type === 'BLOCK' ? 4 : 2;
+      for (let i = 0; i < rows; i++) {
+        const slat = new THREE.Mesh(railGeo, trimMat);
+        slat.scale.set(type === 'BLOCK' ? 1.65 : 1.5, 0.075, 0.035);
+        slat.position.set(0, (i - (rows - 1) / 2) * (type === 'BLOCK' ? 0.63 : 0.3), type === 'BLOCK' ? -0.42 : -0.32);
+        this.mesh.add(slat);
+      }
+      if (type === 'HIGH') {
+        for (const side of [-1, 1]) {
+          const support = new THREE.Mesh(railGeo, highMat);
+          support.scale.set(0.09, 1, 0.5);
+          support.position.set(side * 0.86, -1.1, 0);
+          this.mesh.add(support);
+        }
+      }
     }
   }
 

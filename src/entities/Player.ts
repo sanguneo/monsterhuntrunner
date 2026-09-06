@@ -1,11 +1,12 @@
 // ============================================================
 // 플레이어 — 레인 이동 / 점프 / 슬라이드 / 성장 스탯 (§5, §10, §13.2)
-// view: 캡슐 프리미티브 + 망토 어태치먼트 (§3.1, §12)
+// Simulation owns x/y/z; PlayerModel owns the interpolated presentation.
 // ============================================================
 
 import * as THREE from 'three';
 import { CONFIG, laneX } from '../data/config';
-import type { Action, Input } from '../core/Input';
+import type { Action, BufferedAction, Input } from '../core/Input';
+import { PlayerModel } from './PlayerModel';
 import type { SoundId } from '../systems/Sound';
 
 export class Player {
@@ -18,10 +19,11 @@ export class Player {
   jumping = false;
   sliding = false;
   private slideTimer = 0;
-  private laneFrom = laneX(CONFIG.lanes.startIndex);
-  private laneT = 1; // 레인 보간 진행도 (1=완료)
+  private lateralVelocity = 0;
   private lastGroundedAt = 0; // 코요테 타임용
-  private queuedAction: Action | null = null; // 액션 중 입력 큐 1개 (§13.2)
+  private queuedAction: BufferedAction | null = null;
+  private readonly simulationPosition = new THREE.Vector3();
+  private readonly previousPosition = new THREE.Vector3();
 
   // --- 전투/성장 스탯 ---
   hp = CONFIG.player.baseHp;
@@ -37,75 +39,29 @@ export class Player {
   alive = true;
 
   // --- view ---
-  readonly group: THREE.Group;
-  private body: THREE.Mesh;
-  private capeMesh: THREE.Mesh | null = null;
-  private hatMesh: THREE.Mesh | null = null;
-  private time = 0;
+  private readonly model = new PlayerModel();
+  readonly group = this.model.group;
+  private readonly shadow = new THREE.Mesh(
+    new THREE.CircleGeometry(0.6, 24),
+    new THREE.MeshBasicMaterial({ color: 0x4c4059, transparent: true, opacity: 0.2, depthWrite: false }),
+  );
+  onLand: (() => void) | null = null;
   /** 동작 성공 시 효과음 재생 훅 (Game이 SoundManager로 연결) */
   sfx: ((id: SoundId) => void) | null = null;
 
   constructor() {
-    this.group = new THREE.Group();
-    const geo = new THREE.CapsuleGeometry(0.4, 0.8, 6, 12);
-    const mat = new THREE.MeshStandardMaterial({ color: 0xff7849, emissive: 0x33150a });
-    this.body = new THREE.Mesh(geo, mat);
-    this.body.position.y = 0.8;
-    this.group.add(this.body);
+    this.shadow.rotation.x = -Math.PI / 2;
+    this.shadow.name = 'courier-ground-shadow';
+    this.group.add(this.shadow);
+    this.syncRender();
   }
 
-  /** 망토 장착 외형 (§12) — Cosmetics에서 호출. 색상은 보상 아이템별. */
-  equipCape(color: number): void {
-    if (this.capeMesh) {
-      (this.capeMesh.material as THREE.MeshStandardMaterial).color.setHex(color);
-      return;
-    }
-    const geo = new THREE.ConeGeometry(0.55, 1.1, 10, 1, true);
-    const mat = new THREE.MeshStandardMaterial({
-      color,
-      emissive: 0x222233,
-      transparent: true,
-      opacity: 0.88,
-      side: THREE.DoubleSide,
-    });
-    this.capeMesh = new THREE.Mesh(geo, mat);
-    this.capeMesh.position.set(0, 0.75, -0.28);
-    this.capeMesh.rotation.x = 0.25;
-    this.group.add(this.capeMesh);
-  }
-
-  unequipCape(): void {
-    if (!this.capeMesh) return;
-    this.group.remove(this.capeMesh);
-    this.capeMesh = null;
-  }
-
-  /** 모자 장착 외형 (§12 모자 슬롯) */
-  equipHat(color: number): void {
-    if (this.hatMesh) {
-      (this.hatMesh.material as THREE.MeshStandardMaterial).color.setHex(color);
-      return;
-    }
-    const geo = new THREE.ConeGeometry(0.36, 0.5, 10);
-    const mat = new THREE.MeshStandardMaterial({ color, emissive: 0x222222 });
-    this.hatMesh = new THREE.Mesh(geo, mat);
-    this.hatMesh.position.set(0, 1.85, 0);
-    this.group.add(this.hatMesh);
-  }
-
-  unequipHat(): void {
-    if (!this.hatMesh) return;
-    this.group.remove(this.hatMesh);
-    this.hatMesh = null;
-  }
-
-  get hasCape(): boolean {
-    return this.capeMesh !== null;
-  }
-
-  get hasHat(): boolean {
-    return this.hatMesh !== null;
-  }
+  equipCape(color: number): void { this.model.equipCape(color); }
+  unequipCape(): void { this.model.unequipCape(); }
+  equipHat(color: number): void { this.model.equipHat(color); }
+  unequipHat(): void { this.model.unequipHat(); }
+  get hasCape(): boolean { return this.model.hasCape; }
+  get hasHat(): boolean { return this.model.hasHat; }
 
   get airborne(): boolean {
     return this.y > 0.01;
@@ -127,22 +83,19 @@ export class Player {
   }
 
   update(dt: number, input: Input, allowControl: boolean): void {
-    this.time += dt;
-    if (this.invulnTimer > 0) this.invulnTimer -= dt;
-    if (this.dashTimer > 0) this.dashTimer -= dt;
+    if (this.invulnTimer > 0) this.invulnTimer = Math.max(0, this.invulnTimer - dt);
+    if (this.dashTimer > 0) this.dashTimer = Math.max(0, this.dashTimer - dt);
 
     if (allowControl) this.handleInput(input);
+    else this.clearActions();
 
-    // 레인 보간 (0.12s)
-    if (this.laneT < 1) {
-      this.laneT = Math.min(1, this.laneT + dt / CONFIG.lanes.moveTime);
-      const target = laneX(this.lane);
-      // smoothstep 보간
-      const s = this.laneT * this.laneT * (3 - 2 * this.laneT);
-      this.x = this.laneFrom + (target - this.laneFrom) * s;
-    } else {
-      this.x = laneX(this.lane);
-    }
+    // Retarget from the current position, with a distance-scaled duration.
+    // Two quick inputs cannot cross two lanes at twice the intended speed.
+    const delta = laneX(this.lane) - this.x;
+    const travel = Math.min(Math.abs(delta), CONFIG.lanes.spacing / CONFIG.lanes.moveTime * dt);
+    const movement = Math.sign(delta) * travel;
+    this.x += movement;
+    this.lateralVelocity = dt > 0 ? movement / dt : 0;
 
     // 점프 물리
     if (this.jumping) {
@@ -152,6 +105,7 @@ export class Player {
         this.y = 0;
         this.vy = 0;
         this.jumping = false;
+        this.onLand?.();
       }
     }
     if (!this.airborne) this.lastGroundedAt = performance.now() / 1000;
@@ -162,21 +116,26 @@ export class Player {
       if (this.slideTimer <= 0) this.sliding = false;
     }
 
-    // 액션 종료 시 큐 입력 실행 (§13.2 액션 중 입력 큐 1개)
-    if (this.queuedAction && allowControl) {
-      const a = this.queuedAction;
-      if (this.tryAction(a)) this.queuedAction = null;
+    if (this.queuedAction && performance.now() / 1000 - this.queuedAction.time > CONFIG.accessibility.inputBuffer) {
+      this.clearActions();
     }
+    if (this.queuedAction && allowControl && !this.jumping && !this.airborne) {
+      const action = this.queuedAction.action;
+      this.clearActions();
+      this.tryAction(action);
+    }
+  }
 
-    this.updateView();
+  clearActions(): void {
+    this.queuedAction = null;
   }
 
   private handleInput(input: Input): void {
-    let action: Action | null;
-    while ((action = input.consumeAny(['left', 'right', 'jump', 'slide'])) !== null) {
-      if (!this.tryAction(action)) {
-        this.queuedAction = action; // 실행 불가 → 1개 큐잉
-      }
+    let entry: BufferedAction | null;
+    while ((entry = input.consumeEntry(['left', 'right', 'jump', 'slide'])) !== null) {
+      const vertical = entry.action === 'jump' || entry.action === 'slide';
+      if (vertical) this.clearActions();
+      if (!this.tryAction(entry.action) && vertical) this.queuedAction = entry;
     }
   }
 
@@ -204,7 +163,7 @@ export class Player {
         return false;
       }
       case 'slide':
-        if (!this.airborne) {
+        if (!this.jumping && !this.airborne) {
           this.sliding = true;
           this.slideTimer = CONFIG.run.slideDuration;
           this.sfx?.('slide');
@@ -219,9 +178,7 @@ export class Player {
   }
 
   private startLaneMove(target: number): void {
-    this.laneFrom = this.x;
     this.lane = target;
-    this.laneT = 0;
     this.sfx?.('laneMove');
   }
 
@@ -250,8 +207,7 @@ export class Player {
     this.expToNext = CONFIG.progression.expCurve(1);
     this.lane = CONFIG.lanes.startIndex;
     this.x = laneX(this.lane);
-    this.laneFrom = this.x;
-    this.laneT = 1;
+    this.lateralVelocity = 0;
     this.y = 0;
     this.z = 0;
     this.vy = 0;
@@ -259,37 +215,39 @@ export class Player {
     this.sliding = false;
     this.invulnTimer = 0;
     this.dashTimer = 0;
-    this.queuedAction = null;
+    this.clearActions();
+    this.slideTimer = 0;
+    this.lastGroundedAt = performance.now() / 1000;
     this.alive = true;
+    this.model.reset();
+    this.syncRender();
   }
 
-  private updateView(): void {
-    this.group.position.set(this.x, this.y, this.z);
-    // 슬라이드: 몸 낮추기
-    const targetScaleY = this.sliding ? 0.45 : 1;
-    this.body.scale.y += (targetScaleY - this.body.scale.y) * 0.4;
-    this.body.position.y = 0.8 * this.body.scale.y;
-    // 달리기 바운스
-    if (!this.airborne && !this.sliding) {
-      this.body.position.y += Math.abs(Math.sin(this.time * 10)) * 0.06;
-    }
-    // 무적/대시 깜빡임
-    if (this.dashTimer > 0) {
-      this.body.visible = true;
-      (this.body.material as THREE.MeshStandardMaterial).emissive.setHex(0x2255aa);
-    } else if (this.invulnTimer > 0) {
-      this.body.visible = Math.floor(this.time * 14) % 2 === 0;
-      (this.body.material as THREE.MeshStandardMaterial).emissive.setHex(0x33150a);
-    } else {
-      this.body.visible = true;
-      (this.body.material as THREE.MeshStandardMaterial).emissive.setHex(0x33150a);
-    }
-    if (this.capeMesh) {
-      this.capeMesh.rotation.x = 0.25 + Math.sin(this.time * 6) * 0.08;
-    }
+  /** Called by Game BEFORE advancing z or any other simulation coordinate. */
+  beginStep(): void {
+    this.previousPosition.copy(this.position);
+  }
+
+  /** Teleports/reset/revive must synchronize both ends of interpolation. */
+  syncRender(): void {
+    this.previousPosition.copy(this.position);
+    this.group.position.copy(this.position);
+  }
+
+  render(dt: number, alpha: number, running: boolean): void {
+    this.group.position.lerpVectors(this.previousPosition, this.position, alpha);
+    this.shadow.position.y = -this.group.position.y + 0.008;
+    const shadowScale = 1 / (1 + this.group.position.y * 0.25);
+    this.shadow.scale.set(shadowScale, shadowScale * 0.72, 1);
+    this.shadow.material.opacity = 0.2 / (1 + this.group.position.y * 0.3);
+    this.model.update(dt, {
+      running, airborne: this.jumping || this.airborne, sliding: this.sliding,
+      lateralVelocity: this.lateralVelocity, verticalVelocity: this.vy,
+      dash: this.dashTimer > 0, invulnerable: this.invulnerable, alive: this.alive,
+    });
   }
 
   get position(): THREE.Vector3 {
-    return this.group.position;
+    return this.simulationPosition.set(this.x, this.y, this.z);
   }
 }

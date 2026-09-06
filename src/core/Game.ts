@@ -11,6 +11,7 @@ import { Input } from './Input';
 import { CameraController } from './Camera';
 import { Tutorial } from './Tutorial';
 import { Environment } from './Environment';
+import { Effects } from './Effects';
 import { computeScore, skillUnlocked, newlyUnlockedSkillKey } from './rules';
 import { Player } from '../entities/Player';
 import { Monster } from '../entities/Monster';
@@ -72,6 +73,7 @@ export class Game {
   readonly progression: Progression;
   readonly inventory: Inventory;
   readonly cosmetics: Cosmetics;
+  readonly effects: Effects;
 
   monsters: Monster[] = [];
   obstacles: Obstacle[] = [];
@@ -102,6 +104,7 @@ export class Game {
   private finalScore = 0;
   private isNewRecord = false;
   private currentBgm: SoundId | null = null;
+  private dashMoteTimer = 0;
 
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -111,16 +114,22 @@ export class Game {
     this.scene = new THREE.Scene();
     this.setMood('normal');
 
-    const hemi = new THREE.HemisphereLight(0xbcaaff, 0x2a1f3d, 1.1);
-    const dir = new THREE.DirectionalLight(0xffffff, 0.9);
-    dir.position.set(3, 8, -4);
-    this.scene.add(hemi, dir);
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.2;
+    const hemi = new THREE.HemisphereLight(0xfff3da, 0x929fb3, 2.2);
+    const dir = new THREE.DirectionalLight(0xffebcf, 2.6);
+    dir.position.set(-3, 8, -5);
+    const rim = new THREE.DirectionalLight(0xb1e9ef, 1.4);
+    rim.position.set(4, 3, 6);
+    this.scene.add(hemi, dir, rim);
+    this.effects = new Effects(this.scene);
 
     this.env = new Environment(this.scene);
     this.cameraCtl = new CameraController(window.innerWidth / window.innerHeight);
 
     this.player = new Player();
     this.scene.add(this.player.group);
+    this.player.onLand = () => this.effects.emit('land', this.player.position);
 
     this.sound = new SoundManager();
     this.player.sfx = (id) => this.sound.play(id); // 점프/슬라이드/레인이동 효과음 배선
@@ -133,6 +142,7 @@ export class Game {
     this.input = new Input(canvas);
     this.input.onAction = (a) => {
       if (a === 'pause') this.togglePause();
+      else if (!this.skillsEnabled) this.input.clear();
     };
 
     this.hud = new HUD(this);
@@ -163,8 +173,10 @@ export class Game {
           this.update(this.STEP);
           this.accumulator -= this.STEP;
         }
+        this.player.render(frameDt, this.accumulator / this.STEP, this.runSpeed > 0 && this.skillsEnabled);
+        this.effects.update(frameDt);
+        this.cameraCtl.update(frameDt, this.player.group.position, this.boss?.position ?? null);
       }
-      this.cameraCtl.update(frameDt, this.player.position, this.boss?.position ?? null);
       this.renderer.render(this.scene, this.cameraCtl.camera);
       requestAnimationFrame(loop);
     };
@@ -250,7 +262,8 @@ export class Game {
 
   /** 스킬 사용 가능 여부 — 튜토리얼은 스킬 단계부터 */
   get skillsEnabled(): boolean {
-    return this.isRunningState || this.isBossState || this.inTutorial;
+    return !this.paused && this.stageIntroTimer <= 0 &&
+      (this.isRunningState || this.isBossState || this.inTutorial);
   }
 
   segmentProgress(): number {
@@ -310,6 +323,14 @@ export class Game {
   // ----------------------------------------------------------
 
   private update(dt: number): void {
+    this.player.beginStep();
+    if (this.player.dashTimer > 0) {
+      this.dashMoteTimer -= dt;
+      if (this.dashMoteTimer <= 0) {
+        this.effects.emit('dash', this.player.position);
+        this.dashMoteTimer = 0.05;
+      }
+    }
     switch (this.state) {
       case 'TITLE':
         this.env.update(this.player.z);
@@ -414,6 +435,8 @@ export class Game {
   setState(next: GameStateName): void {
     this.state = next;
     this.input.clear(); // 전환 시 입력 버퍼 초기화 (§15.4)
+    this.player.clearActions();
+    this.effects.clear();
 
     switch (next) {
       case 'TITLE':
@@ -579,6 +602,8 @@ export class Game {
       return;
     }
     this.paused = !this.paused;
+    this.input.clear();
+    this.player.clearActions();
     if (this.paused) this.screens.showPause();
     else this.screens.hide();
   }
@@ -590,6 +615,8 @@ export class Game {
     this.stageIntroTimer = 0;
     this.screens.hideStageIntro();
     this.input.clear();
+    this.player.clearActions();
+    this.cameraCtl.reset(this.player.position, this.boss?.position ?? null);
     // 새로 해금된 스킬이 있으면 그 안내를 우선, 없으면 월드 배너
     if (!this.announceUnlockedSkills()) {
       this.hud.showBanner(`${worldThemeIcon(this.world.id)} ${t(this.world.nameKey)}`, 1.6);
@@ -677,6 +704,7 @@ export class Game {
     p.exp = cp.player.exp;
     p.expToNext = cp.player.expToNext;
     p.z = cp.player.z;
+    p.syncRender();
     this.inventory.restore(cp.inventory);
     this.cosmetics.apply(p, this.inventory);
     this.stats = { ...cp.stats };
@@ -686,6 +714,8 @@ export class Game {
     this.screens.hide();
     this.hud.show();
     this.setState(cp.state);
+    this.cameraCtl.reset(p.position, this.boss?.position ?? null);
+    this.env.update(p.z);
   }
 
   // ----------------------------------------------------------
@@ -733,6 +763,7 @@ export class Game {
     if (!this.player.alive) return false;
     const applied = this.player.takeDamage(amount);
     if (applied) {
+      this.effects.emit('hit', this.player.position);
       this.hud.damageFlash();
       this.sound.play('hitPlayer');
       this.cameraCtl.shake(0.08, 0.12);
@@ -747,6 +778,7 @@ export class Game {
     m.alive = false;
     this.scene.remove(m.mesh);
     this.stats.kills += 1;
+    this.effects.emit('defeat', m.position);
     this.sound.play('kill');
 
     this.progression.addExp(m.exp);
@@ -770,6 +802,7 @@ export class Game {
 
   onPickupCollected(pk: Pickup): void {
     pk.collected = true;
+    this.effects.emit(pk.type === 'heal' ? 'heal' : 'collect', pk.mesh.position);
     this.scene.remove(pk.mesh);
     switch (pk.type) {
       case 'coin':
@@ -813,8 +846,9 @@ export class Game {
   setMood(mode: 'normal' | 'dark'): void {
     const theme = this.world.theme;
     const bg = mode === 'dark' ? theme.bgDark : theme.bg;
-    this.scene.background = new THREE.Color(bg);
-    this.scene.fog = new THREE.Fog(bg, 24, mode === 'dark' ? 55 : 80);
+    const sky = new THREE.Color(bg).lerp(new THREE.Color(0xd5e4ef), mode === 'dark' ? 0.2 : 0.65);
+    this.scene.background = sky;
+    this.scene.fog = new THREE.Fog(sky, 24, mode === 'dark' ? 55 : 80);
   }
 
   /** BGM 전환 — 동시 1개. 같은 트랙이면 무시(중복 재생 방지). null이면 정지. */
@@ -844,6 +878,9 @@ export class Game {
   }
 
   private resetRun(): void {
+    this.input.clear();
+    this.effects.clear();
+    this.dashMoteTimer = 0;
     this.clearEntities();
     this.disposeBoss();
     this.player.resetForRun();
@@ -864,6 +901,8 @@ export class Game {
     this.isNewRecord = false;
     this.finalScore = 0;
     this.applyWorldTheme();
+    this.env.update(0);
+    this.cameraCtl.reset(this.player.position, null);
     this.screens.hideTutorialPrompt();
     this.screens.hideTutorialSkip();
     this.hud.setShade(0);

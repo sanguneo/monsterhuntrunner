@@ -7,6 +7,7 @@
 // ============================================================
 
 import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { CONFIG, laneX } from '../data/config';
 import type { BossPhaseConfig } from '../data/config';
 import type { BossDef, BossPartDef, PatternDef } from '../data/worlds';
@@ -183,10 +184,10 @@ export class Boss {
       let geo: THREE.BufferGeometry;
       switch (p.geo) {
         case 'box':
-          geo = new THREE.BoxGeometry(p.size[0], p.size[1], p.size[2]);
+          geo = new RoundedBoxGeometry(p.size[0], p.size[1], p.size[2], 2, Math.min(...p.size) * 0.18);
           break;
         case 'sphere':
-          geo = new THREE.SphereGeometry(p.size[0], 14, 12);
+          geo = new THREE.SphereGeometry(p.size[0], 20, 14);
           break;
         case 'capsule':
           geo = new THREE.CapsuleGeometry(p.size[0], p.size[1], 6, 12);
@@ -198,12 +199,13 @@ export class Boss {
           geo = new THREE.CylinderGeometry(p.size[0], p.size[1], p.size[2], 12);
           break;
         case 'ico':
-          geo = new THREE.IcosahedronGeometry(p.size[0], 0);
+          geo = new THREE.IcosahedronGeometry(p.size[0], 1);
           break;
       }
       const mat = new THREE.MeshStandardMaterial({
-        color: p.color,
-        emissive: p.emissive ?? 0x111111,
+        color: p.color === 0xff0000 ? 0x3e304d : p.color,
+        emissive: p.color === 0xff0000 ? 0x000000 : p.emissive ?? 0x000000,
+        roughness: 0.78,
         transparent: p.opacity !== undefined,
         opacity: p.opacity ?? 1,
       });
@@ -211,6 +213,27 @@ export class Boss {
       mesh.position.set(...p.pos);
       if (p.scale) mesh.scale.set(...p.scale);
       g.add(mesh);
+    }
+    // Keep each boss's existing signature props, but give its face a toy-like
+    // expression instead of tiny red points. Each instance owns these resources.
+    const head = parts.filter((part) => part.geo === 'sphere' && part.size[0] >= 0.35)
+      .sort((a, b) => b.pos[1] - a.pos[1])[0];
+    if (head) {
+      for (const side of [-1, 1]) {
+        const radius = head.size[0];
+        const eye = new THREE.Mesh(new THREE.SphereGeometry(radius * 0.15, 12, 8),
+          new THREE.MeshStandardMaterial({ color: 0x372f46, roughness: 0.5 }));
+        eye.position.set(head.pos[0] + side * radius * 0.37, head.pos[1], head.pos[2] - radius * 0.94);
+        eye.scale.set(1, 1.3, 0.45);
+        const glint = new THREE.Mesh(new THREE.SphereGeometry(radius * 0.045, 8, 6),
+          new THREE.MeshBasicMaterial({ color: 0xfff5df }));
+        glint.position.copy(eye.position).add(new THREE.Vector3(-0.018, 0.035, -radius * 0.07));
+        const cheek = new THREE.Mesh(new THREE.SphereGeometry(radius * 0.15, 10, 8),
+          new THREE.MeshStandardMaterial({ color: 0xf3aca8, roughness: 0.9 }));
+        cheek.position.set(head.pos[0] + side * radius * 0.65, head.pos[1] - radius * 0.28, head.pos[2] - radius * 0.8);
+        cheek.scale.set(1, 0.55, 0.25);
+        g.add(eye, glint, cheek);
+      }
     }
     return g;
   }
@@ -281,6 +304,7 @@ export class Boss {
 
   update(dt: number): void {
     this.bobT += dt;
+    this.bodyGroup.rotation.z = Math.sin(this.bobT * 2.3) * 0.035;
     if (this.invulnTimer > 0) this.invulnTimer -= dt;
 
     const targetX = laneX(this.lane);
@@ -552,6 +576,8 @@ export class Boss {
         // 락: 마커 위치 고정, 잠깐의 마지막 회피 기회
         this.chaseLane = player.lane;
         this.markers[0].position.x = laneX(this.chaseLane);
+        this.markers[0].visible = true;
+        this.markerMat.opacity = 0.65;
         this.state = 'active';
         this.timer = def.lockTime ?? 0.35;
         break;
