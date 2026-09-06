@@ -83,12 +83,14 @@ export interface BossDef {
   visual: BossPartDef[];
 }
 
-export interface RewardItemDef {
-  slot: 'cape' | 'hat';
+export type CapeStyle = 'ghost' | 'vampire';
+export type HatStyle = 'patchwork' | 'lightning' | 'coral' | 'bone';
+
+export type RewardItemDef = {
   color: number;
   emoji: string;
   nameKey: string;
-}
+} & ({ slot: 'cape'; appearance: CapeStyle } | { slot: 'hat'; appearance: HatStyle });
 
 export interface WorldTheme {
   bg: number;
@@ -170,12 +172,12 @@ export const TITLE_BG_IMAGE = `${ASSET_BASE}assets/images/title_bg.webp`;
 // ---------- 보상 아이템 ----------
 
 export const REWARD_ITEMS: Record<string, RewardItemDef> = {
-  ghost_cape: { slot: 'cape', color: 0xcfe8ff, emoji: '🧥', nameKey: 'reward.ghost_cape' },
-  zombie_hat: { slot: 'hat', color: 0x3f6212, emoji: '🎩', nameKey: 'reward.zombie_hat' },
-  lightning_helmet: { slot: 'hat', color: 0xfde047, emoji: '⛑️', nameKey: 'reward.lightning_helmet' },
-  seawitch_crown: { slot: 'hat', color: 0x22d3ee, emoji: '👑', nameKey: 'reward.seawitch_crown' },
-  dracula_cape: { slot: 'cape', color: 0x7f1d1d, emoji: '🦇', nameKey: 'reward.dracula_cape' },
-  skull_crown: { slot: 'hat', color: 0xe7e5e4, emoji: '👑', nameKey: 'reward.skull_crown' },
+  ghost_cape: { slot: 'cape', appearance: 'ghost', color: 0xcfe8ff, emoji: '🧥', nameKey: 'reward.ghost_cape' },
+  zombie_hat: { slot: 'hat', appearance: 'patchwork', color: 0x3f6212, emoji: '🎩', nameKey: 'reward.zombie_hat' },
+  lightning_helmet: { slot: 'hat', appearance: 'lightning', color: 0xfde047, emoji: '⛑️', nameKey: 'reward.lightning_helmet' },
+  seawitch_crown: { slot: 'hat', appearance: 'coral', color: 0x22d3ee, emoji: '👑', nameKey: 'reward.seawitch_crown' },
+  dracula_cape: { slot: 'cape', appearance: 'vampire', color: 0x7f1d1d, emoji: '🦇', nameKey: 'reward.dracula_cape' },
+  skull_crown: { slot: 'hat', appearance: 'bone', color: 0xe7e5e4, emoji: '👑', nameKey: 'reward.skull_crown' },
 };
 
 // ---------- 월드 데이터 ----------
@@ -187,11 +189,11 @@ export const WORLDS: WorldDef[] = [
     nameKey: 'world.school',
     emoji: '🏫',
     theme: {
-      bg: 0x8b97c5,
+      bg: 0x141529,
       bgDark: 0x120a1c,
-      floor: 0x8276a4,
-      wallA: 0x578b77,
-      wallB: 0xa881ab,
+      floor: 0x3c3852,
+      wallA: 0x424668,
+      wallB: 0x25273f,
       obsLow: 0xb45309,
       obsHigh: 0x7c3aed,
       obsBlock: 0x57534e,
@@ -278,11 +280,11 @@ export const WORLDS: WorldDef[] = [
     nameKey: 'world.zombie',
     emoji: '🧟',
     theme: {
-      bg: 0x759785,
+      bg: 0x11231e,
       bgDark: 0x0c140c,
-      floor: 0x7b8049,
-      wallA: 0x397449,
-      wallB: 0x9b8260,
+      floor: 0x384439,
+      wallA: 0x58614b,
+      wallB: 0x39483c,
       obsLow: 0x854d0e,
       obsHigh: 0x3f6212,
       obsBlock: 0x44403c,
@@ -364,11 +366,11 @@ export const WORLDS: WorldDef[] = [
     nameKey: 'world.lab',
     emoji: '⚡',
     theme: {
-      bg: 0x7196b3,
+      bg: 0x0b192b,
       bgDark: 0x0a1118,
-      floor: 0x5f879c,
-      wallA: 0x39959f,
-      wallB: 0x7386b4,
+      floor: 0x273747,
+      wallA: 0x466279,
+      wallB: 0x26394e,
       obsLow: 0x0e7490,
       obsHigh: 0x6d28d9,
       obsBlock: 0x475569,
@@ -462,11 +464,11 @@ export const WORLDS: WorldDef[] = [
     nameKey: 'world.sea',
     emoji: '🌊',
     theme: {
-      bg: 0x56afb9,
+      bg: 0x062536,
       bgDark: 0x071521,
-      floor: 0x81baa9,
-      wallA: 0x358eaa,
-      wallB: 0x73bfc6,
+      floor: 0x24505c,
+      wallA: 0x235b6b,
+      wallB: 0x123d50,
       obsLow: 0x0369a1,
       obsHigh: 0x0d9488,
       obsBlock: 0x334155,
@@ -560,11 +562,11 @@ export const WORLDS: WorldDef[] = [
     nameKey: 'world.dracula',
     emoji: '🦇',
     theme: {
-      bg: 0x9676aa,
+      bg: 0x211326,
       bgDark: 0x140810,
-      floor: 0x80567f,
-      wallA: 0x695983,
-      wallB: 0x9b6e94,
+      floor: 0x3b2b45,
+      wallA: 0x54405c,
+      wallB: 0x332839,
       obsLow: 0x9f1239,
       obsHigh: 0x7f1d1d,
       obsBlock: 0x3f3f46,
@@ -650,11 +652,11 @@ export const WORLDS: WorldDef[] = [
     nameKey: 'world.skull',
     emoji: '💀',
     theme: {
-      bg: 0xbc9085,
+      bg: 0x211c2d,
       bgDark: 0x0e0d12,
-      floor: 0xac8254,
-      wallA: 0x8c8858,
-      wallB: 0xb7a075,
+      floor: 0x413c50,
+      wallA: 0x69616e,
+      wallB: 0x393442,
       obsLow: 0xa16207,
       obsHigh: 0x6b21a8,
       obsBlock: 0x52525b,

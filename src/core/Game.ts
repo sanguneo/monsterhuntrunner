@@ -115,11 +115,11 @@ export class Game {
     this.setMood('normal');
 
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.2;
-    const hemi = new THREE.HemisphereLight(0xfff3da, 0x929fb3, 2.2);
-    const dir = new THREE.DirectionalLight(0xffebcf, 2.6);
+    this.renderer.toneMappingExposure = 1.05;
+    const hemi = new THREE.HemisphereLight(0xb9cbea, 0x343047, 1.35);
+    const dir = new THREE.DirectionalLight(0xffe4bf, 2.8);
     dir.position.set(-3, 8, -5);
-    const rim = new THREE.DirectionalLight(0xb1e9ef, 1.4);
+    const rim = new THREE.DirectionalLight(0x9cd7f3, 1.6);
     rim.position.set(4, 3, 6);
     this.scene.add(hemi, dir, rim);
     this.effects = new Effects(this.scene);
@@ -846,9 +846,9 @@ export class Game {
   setMood(mode: 'normal' | 'dark'): void {
     const theme = this.world.theme;
     const bg = mode === 'dark' ? theme.bgDark : theme.bg;
-    const sky = new THREE.Color(bg).lerp(new THREE.Color(0xd5e4ef), mode === 'dark' ? 0.2 : 0.65);
+    const sky = new THREE.Color(bg);
     this.scene.background = sky;
-    this.scene.fog = new THREE.Fog(sky, 24, mode === 'dark' ? 55 : 80);
+    this.scene.fog = new THREE.Fog(sky, 24, mode === 'dark' ? 55 : 76);
   }
 
   /** BGM 전환 — 동시 1개. 같은 트랙이면 무시(중복 재생 방지). null이면 정지. */

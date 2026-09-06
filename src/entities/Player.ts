@@ -7,6 +7,7 @@ import * as THREE from 'three';
 import { CONFIG, laneX } from '../data/config';
 import type { Action, BufferedAction, Input } from '../core/Input';
 import { PlayerModel } from './PlayerModel';
+import type { CapeStyle, HatStyle } from '../data/worlds';
 import type { SoundId } from '../systems/Sound';
 
 export class Player {
@@ -56,9 +57,9 @@ export class Player {
     this.syncRender();
   }
 
-  equipCape(color: number): void { this.model.equipCape(color); }
+  equipCape(color: number, style?: CapeStyle): void { this.model.equipCape(color, style); }
   unequipCape(): void { this.model.unequipCape(); }
-  equipHat(color: number): void { this.model.equipHat(color); }
+  equipHat(color: number, style?: HatStyle): void { this.model.equipHat(color, style); }
   unequipHat(): void { this.model.unequipHat(); }
   get hasCape(): boolean { return this.model.hasCape; }
   get hasHat(): boolean { return this.model.hasHat; }
