@@ -100,6 +100,8 @@ export class Screens {
   }
 
   hide(): void {
+    const focused = document.activeElement;
+    if (focused instanceof HTMLElement && this.overlay.contains(focused)) focused.blur();
     this.overlay.hidden = true;
     this.overlay.classList.remove('title-bg');
     this.overlay.style.backgroundImage = '';

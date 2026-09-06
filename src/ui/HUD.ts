@@ -178,8 +178,8 @@ export class HUD {
       const bottom = Math.round(R * Math.sin(ang) - BTN / 2);
       const btn = this.skillBtns.find((b) => b.el.dataset.skill === id);
       if (btn) {
-        btn.el.style.right = `${right}px`;
-        btn.el.style.bottom = `${bottom}px`;
+        btn.el.style.setProperty('--skill-right', `${right}px`);
+        btn.el.style.setProperty('--skill-bottom', `${bottom}px`);
       }
     });
   }
