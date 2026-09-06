@@ -1,16 +1,28 @@
-# Cute-spooky courier runner
+# Cute-spooky monster hunter runner
 
 ## 1. Direction
-An articulated cream-and-caramel woodland courier visits the existing six
-spooky worlds. Rounded toy materials, mint accessories, warm lanterns and
-clear obstacle silhouettes replace placeholder geometry. Existing title,
-world, reward and HUD image assets remain the visual identity.
+An articulated cream-and-caramel rabbit hunter explores the six worlds
+specified in the original vault. Preserve cute proportions, but use precise
+facial construction, tailored cloth, stitched leather, boots and clasps.
+Night-school corridors, ruined village streets, electrical laboratories,
+underwater caves, gothic galleries and bone/stone halls must differ in
+structure, not just color. Existing 2D illustrations remain the reference.
+See `docs/ART_DIRECTION_REVIEW.md` for source evidence and provenance.
 
 ## 2. Color and material
 Fur `#d69a61`, cream `#ffedce`, mint `#70d5b7`, ink `#352c38`,
 blush `#edaca3`. Roughness 0.78-0.95 for plush scenery; brighter smooth
 coins and jewels. Existing per-world colors tint the path and architecture.
-Warm key light, cool rim light, hemisphere fill; fog limits distant clutter.
+Warm readable character key light, cool rim and restrained hemisphere fill.
+World-specific emissive windows, candles and coils punctuate darker fog.
+Do not wash every world toward pale blue or add garden vegetation indoors.
+Model detail comes from curved profiles, bevels, seams, folds, eyelids,
+toes, soles and material contrast; tessellation alone is not refinement.
+The user's subsequent geometry request is implemented with denser actor
+surfaces: ModelKit density 1.35 increases curved profiles and bevel rings,
+while scenery stays at density 1. The bare hunter is 28,448 triangles;
+monsters are 1,830-5,032 and bosses 28,564-38,336. These exceed the original
+per-actor recommendations deliberately; the combined scene remains bounded.
 
 ## 3. Typography
 Preserve Segoe UI / Apple SD Gothic Neo / Noto Sans KR. HUD labels retain
@@ -34,6 +46,8 @@ Gameplay stays at 60 Hz; player transforms interpolate at render frequency.
 Pointer intent commits once at 24 CSS px, expires after 150 ms, and clears
 on lifecycle boundaries. Gait, ear/scarf follow-through and landing squash
 use delta time. Slide is a low prone pose, not a flattened head.
+Equipment has six distinct constructions and inherits the entire pose.
+Secondary motion stays subtle; no material/geometry allocation per frame.
 These runner mechanics have no equivalent form-component animation.
 Reduced-motion CSS removes decorative UI animation; gameplay cues remain.
 
