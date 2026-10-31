@@ -4,3 +4,10 @@ dist/
 .DS_Store
 *:Zone.Identifier
 .lazyweb/
+
+.art/
+# Full-resolution generated references ship in the Library source handoff, not the runtime bundle.
+docs/art-reference/*-concept.png
+
+__pycache__/
+*.pyc

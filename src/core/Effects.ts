@@ -1,11 +1,24 @@
 import * as THREE from 'three';
 
 export type EffectKind = 'collect' | 'heal' | 'hit' | 'defeat' | 'blast' | 'land' | 'dash';
-const puff = new THREE.IcosahedronGeometry(1, 1);
-const ring = new THREE.RingGeometry(0.82, 1, 40);
+const sparkle = new THREE.Shape();
+for (let i = 0; i < 8; i++) {
+  const a = (i * Math.PI) / 4,
+    r = i % 2 ? 0.25 : 1;
+  if (i === 0) sparkle.moveTo(Math.cos(a) * r, Math.sin(a) * r);
+  else sparkle.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+}
+sparkle.closePath();
+const puff = new THREE.ShapeGeometry(sparkle);
+const ring = new THREE.RingGeometry(0.92, 1, 48);
 const palette: Record<EffectKind, number> = {
-  collect: 0xffdf83, heal: 0x90f4bf, hit: 0xffaa98, defeat: 0xcbb9ff,
-  blast: 0xffe4a2, land: 0xe5d6bd, dash: 0x86ffe3,
+  collect: 0xffdf83,
+  heal: 0x90f4bf,
+  hit: 0xffaa98,
+  defeat: 0xcbb9ff,
+  blast: 0xffe4a2,
+  land: 0xe5d6bd,
+  dash: 0x86ffe3,
 };
 
 /** A fixed pool: even continuous dash/collect feedback cannot grow GPU resources. */
@@ -13,11 +26,19 @@ export class Effects {
   readonly group = new THREE.Group();
   private cursor = 0;
   private readonly particles = Array.from({ length: 96 }, () => ({
-    mesh: new THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>(puff, new THREE.MeshBasicMaterial({
-      transparent: true, depthWrite: false, side: THREE.DoubleSide,
-    })),
+    mesh: new THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>(
+      puff,
+      new THREE.MeshBasicMaterial({
+        transparent: true,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      }),
+    ),
     velocity: new THREE.Vector3(),
-    age: 0, life: 0, size: 0, ring: false,
+    age: 0,
+    life: 0,
+    size: 0,
+    ring: false,
   }));
 
   constructor(scene: THREE.Scene) {
@@ -38,12 +59,12 @@ export class Effects {
       p.life = kind === 'blast' ? 0.5 : kind === 'dash' ? 0.3 : 0.55;
       p.ring = kind === 'blast';
       p.size = kind === 'defeat' ? 0.2 : kind === 'land' ? 0.13 : 0.09;
-      const angle = i / count * Math.PI * 2;
+      const angle = (i / count) * Math.PI * 2;
       p.velocity.set(Math.cos(angle) * 1.8, kind === 'land' ? 0.7 : 2, Math.sin(angle) * 1.8);
       p.mesh.geometry = p.ring ? ring : puff;
       p.mesh.position.copy(position);
       p.mesh.position.y += kind === 'land' || p.ring ? 0.06 : 0.65;
-      p.mesh.rotation.set(p.ring ? -Math.PI / 2 : angle, 0, 0);
+      p.mesh.rotation.set(p.ring ? -Math.PI / 2 : 0, 0, angle);
       p.mesh.material.color.setHex(palette[kind]);
       p.mesh.material.opacity = 0.85;
       p.mesh.scale.setScalar(p.ring ? 0.4 : p.size);
@@ -55,7 +76,10 @@ export class Effects {
     for (const p of this.particles) {
       if (!p.mesh.visible) continue;
       p.age += dt;
-      if (p.age >= p.life) { p.mesh.visible = false; continue; }
+      if (p.age >= p.life) {
+        p.mesh.visible = false;
+        continue;
+      }
       const t = p.age / p.life;
       p.mesh.material.opacity = (1 - t) * 0.8;
       if (p.ring) {

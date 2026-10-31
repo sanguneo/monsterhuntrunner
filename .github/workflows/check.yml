@@ -1,0 +1,44 @@
+name: Validate runner
+on:
+  pull_request:
+  push:
+    branches-ignore: [main]
+permissions:
+  contents: read
+concurrency:
+  group: validate-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm test
+      - run: pnpm build
+      - run: pnpm art:export
+      - run: pnpm art:validate
+      - run: python3 scripts/art/test-validator.py
+      - run: pnpm art:qa
+      - name: Keep measured mesh and character QA reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: runner-mesh-and-character-qa
+          path: |
+            .art/final/inventory.json
+            .art/hunter-concept/garment-qa.json
+            .art/hunter-concept/face-qa.json
+            .art/hunter-concept/ground-qa.json
+            .art/hunter-concept/anatomy-qa.json
+            .art/hunter-concept/character-qa.log
+          if-no-files-found: error
+          # Only the six explicit generated reports above are eligible, not arbitrary hidden files.
+          include-hidden-files: true
+          retention-days: 7

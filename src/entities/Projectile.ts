@@ -5,25 +5,71 @@
 
 import * as THREE from 'three';
 import type { EnemyProjShape } from '../data/worlds';
+import { loftGeometry } from '../visual/SculptKit';
 
-const playerGeo = new THREE.SphereGeometry(0.16, 8, 8);
-const playerMat = new THREE.MeshBasicMaterial({ color: 0x7fd6ff });
-const critMat = new THREE.MeshBasicMaterial({ color: 0xffe066 });
-const tailGeo = new THREE.SphereGeometry(0.1, 8, 6);
-const tailMat = new THREE.MeshBasicMaterial({ color: 0xa7ffdc, transparent: true, opacity: 0.5 });
-
+const playerGeo = loftGeometry(
+  [
+    [-0.42, 0, 0],
+    [-0.24, 0.045, 0.045],
+    [-0.04, 0.11, 0.11],
+    [0.13, 0.14, 0.14],
+    [0.22, 0, 0],
+  ],
+  18,
+  16,
+).rotateX(Math.PI / 2);
+const playerMat = new THREE.MeshStandardMaterial({
+  color: 0x9ce6f4,
+  emissive: 0x3baed3,
+  emissiveIntensity: 0.7,
+  roughness: 0.24,
+});
+const critMat = new THREE.MeshStandardMaterial({
+  color: 0xffdf91,
+  emissive: 0xe8aa42,
+  emissiveIntensity: 0.8,
+  roughness: 0.24,
+});
+const tailGeo = new THREE.TorusGeometry(0.12, 0.012, 6, 20);
+const tailMat = new THREE.MeshBasicMaterial({ color: 0xd0ffee, transparent: true, opacity: 0.55, depthWrite: false });
 const enemyGeos: Record<EnemyProjShape, THREE.BufferGeometry> = {
-  ball: new THREE.SphereGeometry(0.26, 10, 8),
-  rod: new THREE.CylinderGeometry(0.1, 0.1, 0.6, 8),
-  shard: new THREE.OctahedronGeometry(0.28, 0),
+  ball: loftGeometry(
+    [
+      [-0.25, 0, 0],
+      [-0.18, 0.18, 0.18],
+      [0, 0.255, 0.255],
+      [0.18, 0.18, 0.18],
+      [0.25, 0, 0],
+    ],
+    16,
+    16,
+  ),
+  rod: loftGeometry(
+    [
+      [-0.34, 0, 0],
+      [-0.31, 0.075, 0.075],
+      [0.28, 0.075, 0.075],
+      [0.34, 0, 0],
+    ],
+    10,
+    12,
+  ),
+  shard: loftGeometry(
+    [
+      [-0.32, 0, 0],
+      [-0.04, 0.15, 0.15],
+      [0.16, 0.11, 0.11],
+      [0.34, 0, 0],
+    ],
+    3,
+    5,
+  ),
 };
-
-const enemyMatCache = new Map<number, THREE.MeshBasicMaterial>();
-
-function enemyMaterial(color: number): THREE.MeshBasicMaterial {
+const enemyMatCache = new Map<number, THREE.MeshStandardMaterial>();
+function enemyMaterial(color: number): THREE.MeshStandardMaterial {
   let m = enemyMatCache.get(color);
   if (!m) {
-    m = new THREE.MeshBasicMaterial({ color });
+    m = new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.45, roughness: 0.28 });
     enemyMatCache.set(color, m);
   }
   return m;
@@ -50,10 +96,10 @@ export class Projectile {
   ) {
     if (owner === 'player') {
       this.mesh = new THREE.Mesh(playerGeo, isCrit ? critMat : playerMat);
-      for (let i = 0; i < 3; i++) {
+      for (let i = 0; i < 2; i++) {
         const tail = new THREE.Mesh(tailGeo, tailMat);
-        tail.position.z = -0.2 - i * 0.18;
-        tail.scale.setScalar(1 - i * 0.2);
+        tail.position.z = -0.11 - i * 0.16;
+        tail.scale.setScalar(1 - i * 0.3);
         this.mesh.add(tail);
       }
       this.spin = false;
