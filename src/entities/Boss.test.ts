@@ -34,3 +34,31 @@ describe('chase lock warning', () => {
     expect(scene.children).toHaveLength(0);
   });
 });
+
+
+describe('authored boss silhouette outline', () => {
+  it('follows the body gesture during stagger without sharing owned geometry', () => {
+    const scene = new THREE.Scene();
+    const game: Game = Object.assign(Object.create(Game.prototype), {
+      scene, player: new Player(), sound: { play: vi.fn() },
+      cameraCtl: { shake: vi.fn() }, hud: { setShade: vi.fn() },
+    });
+    const boss = new Boss(WORLDS[0].midBoss, game, 12);
+    const body = boss.group.children.find((node) => node instanceof THREE.Group)!;
+    const outline = boss.group.children.find((node) => node instanceof THREE.Mesh) as THREE.Mesh;
+    boss.state = 'stagger';
+    for (const dt of [0.1, 0.16, 0.24]) {
+      boss.update(dt);
+      expect(outline.visible).toBe(true);
+      expect(Math.abs(body.rotation.z)).toBeGreaterThan(0.001);
+      expect(outline.quaternion.equals(body.quaternion)).toBe(true);
+    }
+    body.traverse((node) => {
+      if (node instanceof THREE.Mesh) expect(outline.geometry).not.toBe(node.geometry);
+    });
+    const dispose = vi.spyOn(outline.geometry, 'dispose');
+    boss.dispose();
+    expect(dispose).toHaveBeenCalledOnce();
+    expect(scene.children).toHaveLength(0);
+  });
+});

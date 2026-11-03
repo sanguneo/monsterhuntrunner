@@ -18,6 +18,7 @@ export class Monster {
   readonly id: string;
   readonly mesh: THREE.Group;
   private body: THREE.Group;
+  private groundHeight: number | null = null;
   private t = Math.random() * Math.PI * 2;
   /** 보스 소환 잡몹 여부 */
   isMinion = false;
@@ -37,6 +38,10 @@ export class Monster {
     this.mesh = new THREE.Group();
     this.body = createMonsterModel(def);
     this.mesh.add(this.body);
+    if (['zombie', 'zombieDog', 'wireGolem', 'wolf', 'boneGolem', 'skeletonSoldier'].includes(def.id)) {
+      this.groundHeight = -new THREE.Box3().setFromObject(this.body).min.y;
+      this.body.position.y = this.groundHeight - 0.8;
+    }
     this.mesh.name = def.id;
 
     this.mesh.position.set(laneX(lane), 0.8, z);
@@ -53,8 +58,12 @@ export class Monster {
     }
     this.mesh.position.set(x, 0.8 + Math.sin(this.t * 3) * 0.12, this.z);
     // 위협적 흔들림 — 정적인 수집물과 모션으로도 구분
-    this.body.rotation.z = Math.sin(this.t * 6) * 0.18;
-    this.body.rotation.y = Math.sin(this.t * 2.5) * 0.3;
+    const grounded = this.groundHeight !== null;
+    if (grounded)
+      this.body.position.y =
+        this.groundHeight! - 0.8 - Math.sin(this.t * 3) * 0.12 + Math.abs(Math.sin(this.t * 6)) * 0.025;
+    this.body.rotation.z = Math.sin(this.t * 6) * (grounded ? 0.035 : 0.18);
+    this.body.rotation.y = Math.sin(this.t * 2.5) * (grounded ? 0.08 : 0.3);
     this.body.scale.set(1 + Math.sin(this.t * 6) * 0.035, 1 - Math.sin(this.t * 6) * 0.035, 1);
   }
 

@@ -11,7 +11,10 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint .",
-    "format": "prettier --write \"src/**/*.ts\""
+    "format": "prettier --write \"src/**/*.ts\"",
+    "art:export": "node scripts/art/run-export.mjs",
+    "art:validate": "python3 scripts/art/validate-glb.py .art/final",
+    "art:qa": "node scripts/art/run-character-qa.mjs"
   },
   "dependencies": {
     "three": "^0.170.0"

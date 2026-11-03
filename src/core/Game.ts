@@ -5,6 +5,7 @@
 // ============================================================
 
 import * as THREE from 'three';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { CONFIG, laneX } from '../data/config';
 import { t } from '../data/i18n';
 import { Input } from './Input';
@@ -105,6 +106,7 @@ export class Game {
   private isNewRecord = false;
   private currentBgm: SoundId | null = null;
   private dashMoteTimer = 0;
+  private readonly keyLight = new THREE.DirectionalLight(0xffe6c9, 2.4);
 
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -117,11 +119,24 @@ export class Game {
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.05;
     const hemi = new THREE.HemisphereLight(0xb9cbea, 0x343047, 1.35);
-    const dir = new THREE.DirectionalLight(0xffe4bf, 2.8);
-    dir.position.set(-3, 8, -5);
+    const dir = this.keyLight;
+    dir.position.set(-5, 9, -4);
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    dir.castShadow = true;
+    dir.shadow.mapSize.setScalar(window.innerWidth < 900 ? 1024 : 2048);
+    Object.assign(dir.shadow.camera, { left: -9, right: 9, top: 12, bottom: -12, near: 0.5, far: 45 });
+    dir.shadow.normalBias = 0.025;
+    dir.shadow.bias = -0.00015;
+    const studio = new RoomEnvironment();
+    const pmrem = new THREE.PMREMGenerator(this.renderer);
+    this.scene.environment = pmrem.fromScene(studio, 0.04).texture;
+    this.scene.environmentIntensity = 0.28;
+    studio.dispose();
+    pmrem.dispose();
     const rim = new THREE.DirectionalLight(0x9cd7f3, 1.6);
     rim.position.set(4, 3, 6);
-    this.scene.add(hemi, dir, rim);
+    this.scene.add(hemi, dir, dir.target, rim);
     this.effects = new Effects(this.scene);
 
     this.env = new Environment(this.scene);
@@ -177,6 +192,9 @@ export class Game {
         this.effects.update(frameDt);
         this.cameraCtl.update(frameDt, this.player.group.position, this.boss?.position ?? null);
       }
+      // One bounded shadow atlas follows the runner, rather than covering the entire level.
+      this.keyLight.position.set(-5, 9, this.player.z - 4);
+      this.keyLight.target.position.set(0, 0, this.player.z + 7);
       this.renderer.render(this.scene, this.cameraCtl.camera);
       requestAnimationFrame(loop);
     };
@@ -262,8 +280,7 @@ export class Game {
 
   /** 스킬 사용 가능 여부 — 튜토리얼은 스킬 단계부터 */
   get skillsEnabled(): boolean {
-    return !this.paused && this.stageIntroTimer <= 0 &&
-      (this.isRunningState || this.isBossState || this.inTutorial);
+    return !this.paused && this.stageIntroTimer <= 0 && (this.isRunningState || this.isBossState || this.inTutorial);
   }
 
   segmentProgress(): number {

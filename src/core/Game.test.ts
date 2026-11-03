@@ -34,34 +34,73 @@ beforeEach(() => {
     setItem: (key: string, value: string) => storage.set(key, value),
     removeItem: (key: string) => storage.delete(key),
   });
-  vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { frames.push(callback); return frames.length; });
+  vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+    frames.push(callback);
+    return frames.length;
+  });
   canvas = Object.assign(new EventTarget(), { style: {}, hasPointerCapture: () => false, setPointerCapture: () => {} });
   // Skip only browser/WebGL construction; run real Game methods, Player, Input,
   // Camera, Combat, Inventory and Cosmetics. UI/audio/render are boundary spies.
   game = Object.create(Game.prototype);
   Object.assign(game, {
-    scene: new THREE.Scene(), player: new Player(), input: new Input(canvas as HTMLElement),
-    cameraCtl: new CameraController(1), inventory: new Inventory(), cosmetics: new Cosmetics(),
-    state: 'RUNNING_1', paused: false, stageIntroTimer: 0, accumulator: 0, STEP: 1 / 60,
-    lastTime: 0, runElapsed: 0, distance: 0, segmentStart: 0, segmentLength: 650,
-    runSpeed: 0, worldIdx: 0, autoSkill: false, currentBgm: null,
-    monsters: [], obstacles: [], pickups: [], projectiles: [], boss: null,
-    checkpoint: null, stats: { kills: 0, bossKills: 0 },
+    scene: new THREE.Scene(),
+    player: new Player(),
+    input: new Input(canvas as HTMLElement),
+    cameraCtl: new CameraController(1),
+    inventory: new Inventory(),
+    cosmetics: new Cosmetics(),
+    state: 'RUNNING_1',
+    paused: false,
+    stageIntroTimer: 0,
+    accumulator: 0,
+    STEP: 1 / 60,
+    lastTime: 0,
+    runElapsed: 0,
+    distance: 0,
+    segmentStart: 0,
+    segmentLength: 650,
+    runSpeed: 0,
+    worldIdx: 0,
+    autoSkill: false,
+    currentBgm: null,
+    monsters: [],
+    obstacles: [],
+    pickups: [],
+    projectiles: [],
+    boss: null,
+    checkpoint: null,
+    stats: { kills: 0, bossKills: 0 },
     effects: { emit: vi.fn(), update: vi.fn(), clear: vi.fn() },
     renderer: { render: vi.fn() },
+    keyLight: new THREE.DirectionalLight(),
     sound: { play: vi.fn(), stop: vi.fn() },
     env: { update: vi.fn(), setTheme: vi.fn() },
     spawner: { update: vi.fn(), reset: vi.fn() },
-    hud: { update: vi.fn(), hide: vi.fn(), show: vi.fn(), hideBossBar: vi.fn(), showBanner: vi.fn(), setShade: vi.fn() },
+    hud: {
+      update: vi.fn(),
+      hide: vi.fn(),
+      show: vi.fn(),
+      hideBossBar: vi.fn(),
+      showBanner: vi.fn(),
+      setShade: vi.fn(),
+    },
     screens: {
-      showPause: vi.fn(), hide: vi.fn(), showTitle: vi.fn(),
-      hideStageIntro: vi.fn(), isStageIntroVisible: true,
-      showStageIntro: vi.fn(), hideTutorialPrompt: vi.fn(), hideTutorialSkip: vi.fn(),
+      showPause: vi.fn(),
+      hide: vi.fn(),
+      showTitle: vi.fn(),
+      hideStageIntro: vi.fn(),
+      isStageIntroVisible: true,
+      showStageIntro: vi.fn(),
+      hideTutorialPrompt: vi.fn(),
+      hideTutorialSkip: vi.fn(),
     },
   });
   Object.assign(game, { combat: new Combat(game) });
 });
-afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
 describe('game lifecycle input ownership', () => {
   it('clears both queues on pause and resume, including input typed while paused', () => {
@@ -141,5 +180,7 @@ describe('fixed-step/render integration', () => {
     expect(game.effects.update).toHaveBeenCalledTimes(1);
     expect(game.player.group.position.equals(position)).toBe(true);
     expect(game.renderer.render).toHaveBeenCalledTimes(2);
+    expect(game['keyLight'].position.z).toBe(game.player.z - 4);
+    expect(game['keyLight'].target.position.z).toBe(game.player.z + 7);
   });
 });

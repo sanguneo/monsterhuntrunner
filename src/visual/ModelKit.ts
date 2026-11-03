@@ -5,6 +5,17 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 export type Vec3 = readonly [number, number, number];
 export type Surface = 'cloth' | 'leather' | 'metal' | 'glow' | 'eye';
 
+/** Normalize authored normals once, including unused collapsed cap vertices. */
+function normalizeAuthoredNormals(geometry: THREE.BufferGeometry): void {
+  if (!geometry.getAttribute('normal')) geometry.computeVertexNormals();
+  const n = geometry.getAttribute('normal');
+  for (let i=0;i<n.count;i++) {
+    const x=n.getX(i), y=n.getY(i), z=n.getZ(i), length=Math.hypot(x,y,z);
+    if (length>1e-8) n.setXYZ(i,x/length,y/length,z/length);
+    else n.setXYZ(i,0,1,0); // Degenerate cap vertices have no contributing triangle area.
+  }
+}
+
 /** Small authoring toolkit; callers own the resulting model and its resources. */
 export class ModelKit {
   readonly group = new THREE.Group();
@@ -19,10 +30,10 @@ export class ModelKit {
     if (!material) {
       material = new THREE.MeshStandardMaterial({
         color,
-        roughness: surface === 'metal' ? 0.32 : surface === 'eye' ? 0.18 : surface === 'leather' ? 0.62 : 0.88,
-        metalness: surface === 'metal' ? 0.55 : 0,
+        roughness: surface === 'metal' ? 0.3 : surface === 'eye' ? 0.13 : surface === 'leather' ? 0.57 : 0.76,
+        metalness: surface === 'metal' ? 0.72 : 0,
         emissive: surface === 'glow' ? color : 0,
-        emissiveIntensity: surface === 'glow' ? 1.5 : 0,
+        emissiveIntensity: surface === 'glow' ? 0.65 : 0,
       });
       this.materials.set(key, material);
     }
@@ -31,9 +42,12 @@ export class ModelKit {
 
   mesh(geometry: THREE.BufferGeometry, color: number, position: Vec3 = [0, 0, 0],
     scale: Vec3 = [1, 1, 1], parent: THREE.Object3D = this.group, surface: Surface = 'cloth'): THREE.Mesh {
+    normalizeAuthoredNormals(geometry);
     const mesh = new THREE.Mesh(geometry, this.material(color, surface));
     mesh.position.set(...position);
     mesh.scale.set(...scale);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
     parent.add(mesh);
     return mesh;
   }
@@ -96,7 +110,7 @@ export function bakeStaticModel(source: THREE.Group): THREE.Group {
     if (!(object instanceof THREE.Mesh) || Array.isArray(object.material)) return;
     const geometry = object.geometry.index ? object.geometry.toNonIndexed() : object.geometry.clone();
     geometry.applyMatrix4(object.matrixWorld);
-    if (!geometry.getAttribute('normal')) geometry.computeVertexNormals();
+    normalizeAuthoredNormals(geometry);
     if (!geometry.getAttribute('uv')) {
       geometry.setAttribute('uv', new THREE.Float32BufferAttribute(
         new Float32Array(geometry.getAttribute('position').count * 2), 2));
@@ -111,7 +125,10 @@ export function bakeStaticModel(source: THREE.Group): THREE.Group {
   for (const [material, geometries] of batches) {
     const merged = mergeGeometries(geometries);
     if (!merged) throw new Error('Authored model contains incompatible geometry attributes');
-    result.add(new THREE.Mesh(merged, material));
+    const mesh = new THREE.Mesh(merged, material);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    result.add(mesh);
     geometries.forEach(geometry => geometry.dispose());
   }
   originals.forEach(geometry => geometry.dispose());

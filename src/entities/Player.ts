@@ -42,18 +42,12 @@ export class Player {
   // --- view ---
   private readonly model = new PlayerModel();
   readonly group = this.model.group;
-  private readonly shadow = new THREE.Mesh(
-    new THREE.CircleGeometry(0.6, 24),
-    new THREE.MeshBasicMaterial({ color: 0x4c4059, transparent: true, opacity: 0.2, depthWrite: false }),
-  );
   onLand: (() => void) | null = null;
   /** 동작 성공 시 효과음 재생 훅 (Game이 SoundManager로 연결) */
   sfx: ((id: SoundId) => void) | null = null;
 
   constructor() {
-    this.shadow.rotation.x = -Math.PI / 2;
-    this.shadow.name = 'courier-ground-shadow';
-    this.group.add(this.shadow);
+    // The game's following shadow atlas replaces the old opaque blob decal.
     this.syncRender();
   }
 
@@ -237,10 +231,6 @@ export class Player {
 
   render(dt: number, alpha: number, running: boolean): void {
     this.group.position.lerpVectors(this.previousPosition, this.position, alpha);
-    this.shadow.position.y = -this.group.position.y + 0.008;
-    const shadowScale = 1 / (1 + this.group.position.y * 0.25);
-    this.shadow.scale.set(shadowScale, shadowScale * 0.72, 1);
-    this.shadow.material.opacity = 0.2 / (1 + this.group.position.y * 0.3);
     this.model.update(dt, {
       running, airborne: this.jumping || this.airborne, sliding: this.sliding,
       lateralVelocity: this.lateralVelocity, verticalVelocity: this.vy,

@@ -7,7 +7,9 @@
 // ============================================================
 
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { createBossModel } from '../visual/BossModels';
+import { createAttackWall, createWaveGeometry, createTelegraphGeometry } from '../visual/AttackModels';
 import { CONFIG, laneX } from '../data/config';
 import type { BossPhaseConfig } from '../data/config';
 import type { BossDef, PatternDef } from '../data/worlds';
@@ -18,7 +20,7 @@ type BossState =
   'intro' | 'gap' | 'telegraph' | 'active' | 'recovery' | 'stagger' | 'vanish' | 'reappear' | 'phasechange' | 'dead';
 
 interface BlockWall {
-  mesh: THREE.Mesh;
+  mesh: THREE.Group;
   lane: number;
   timer: number;
   duration: number;
@@ -26,20 +28,9 @@ interface BlockWall {
   hitDone: boolean; // 벽당 1회 피해 (BLOCK 장애물과 동일 — 무한 드레인 방지)
 }
 
-const markerGeo = new THREE.PlaneGeometry(1.8, 10);
-const wallGeo = new THREE.BoxGeometry(1.8, 3.2, 1.0);
-const waveGeo = new THREE.BoxGeometry(CONFIG.lanes.spacing * 3 + 1.5, 0.5, 0.8);
-const burstGeo = new THREE.RingGeometry(0.3, 0.55, 22);
-
-const wallMatCache = new Map<number, THREE.MeshStandardMaterial>();
-function wallMaterial(color: number): THREE.MeshStandardMaterial {
-  let m = wallMatCache.get(color);
-  if (!m) {
-    m = new THREE.MeshStandardMaterial({ color, emissive: 0x1a1a22 });
-    wallMatCache.set(color, m);
-  }
-  return m;
-}
+const markerGeo = createTelegraphGeometry();
+const waveGeo = createWaveGeometry(CONFIG.lanes.spacing * 3 + 1.5);
+const burstGeo = new THREE.RingGeometry(0.43, 0.55, 40);
 
 /** 메시의 GPU 리소스 해제. sharedGeo=true면 지오메트리는 공유본이므로 건드리지 않는다. */
 function disposeMesh(mesh: THREE.Mesh, sharedGeo = false): void {
@@ -107,7 +98,18 @@ export class Boss {
     this.group.add(this.bodyGroup);
 
     // 경직(약점) 빨강 윤곽 발광 (§9.4)
-    const outGeo = new THREE.CapsuleGeometry(1.0, 1.4, 6, 12);
+    // Match the actual authored silhouette instead of an unrelated capsule envelope.
+    const outlineParts: THREE.BufferGeometry[] = [];
+    this.bodyGroup.updateMatrixWorld(true);
+    this.bodyGroup.traverse((node) => {
+      if (!(node instanceof THREE.Mesh)) return;
+      const geometry = node.geometry.clone();
+      geometry.deleteAttribute('color'); // Outline has one uniform warning color.
+      geometry.applyMatrix4(node.matrixWorld);
+      outlineParts.push(geometry);
+    });
+    const outGeo = mergeGeometries(outlineParts)!;
+    outlineParts.forEach((geometry) => geometry.dispose());
     const outMat = new THREE.MeshBasicMaterial({
       color: 0xff2222,
       side: THREE.BackSide,
@@ -115,8 +117,8 @@ export class Boss {
       opacity: 0.5,
     });
     this.outline = new THREE.Mesh(outGeo, outMat);
-    this.outline.scale.setScalar(1.25);
-    this.outline.position.y = 1.4;
+    this.outline.scale.setScalar(1.025);
+    this.outline.position.y = -0.025;
     this.outline.visible = false;
     this.group.add(this.outline);
 
@@ -245,6 +247,7 @@ export class Boss {
   update(dt: number): void {
     this.bobT += dt;
     this.bodyGroup.rotation.z = Math.sin(this.bobT * 2.3) * 0.035;
+    this.outline.quaternion.copy(this.bodyGroup.quaternion);
     if (this.invulnTimer > 0) this.invulnTimer -= dt;
 
     const targetX = laneX(this.lane);
@@ -497,8 +500,12 @@ export class Boss {
       }
 
       case 'wave': {
-        const mat = new THREE.MeshBasicMaterial({
+        const mat = new THREE.MeshStandardMaterial({
           color: def.color ?? 0xffe28a,
+          roughness: 0.24,
+          metalness: 0.08,
+          emissive: def.color ?? 0xffe28a,
+          emissiveIntensity: 0.12,
           transparent: true,
           opacity: 0.85,
         });
@@ -546,7 +553,7 @@ export class Boss {
 
       case 'walls':
         for (const lane of this.targetLanes) {
-          const mesh = new THREE.Mesh(wallGeo, wallMaterial(def.color ?? 0x1c1022));
+          const mesh = createAttackWall(this.def.id, def.color ?? 0x1c1022);
           mesh.position.set(laneX(lane), 1.6, player.z + 0.5);
           this.game.scene.add(mesh);
           this.blockWalls.push({
@@ -744,7 +751,7 @@ export class Boss {
       this.outline.visible = true;
       const pulse = 0.35 + Math.abs(Math.sin(this.bobT * 8)) * 0.35;
       (this.outline.material as THREE.MeshBasicMaterial).opacity = pulse;
-      this.outline.scale.setScalar(1.25 + Math.sin(this.bobT * 8) * 0.05);
+      this.outline.scale.setScalar(1.025 + Math.sin(this.bobT * 8) * 0.008);
     } else {
       this.outline.visible = false;
     }
@@ -785,7 +792,7 @@ export class Boss {
       disposeMesh(this.wave, true); // waveGeo는 공유, 머티리얼만 해제
       this.wave = null;
     }
-    // blockWalls: 공유 wallGeo + 캐시 머티리얼 → scene 제거만
+    // blockWalls: immutable shared authored wall geometry/materials → scene 제거만
     this.blockWalls.forEach((w) => this.game.scene.remove(w.mesh));
     this.blockWalls = [];
     this.fx.forEach((f) => {

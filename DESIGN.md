@@ -18,11 +18,12 @@ World-specific emissive windows, candles and coils punctuate darker fog.
 Do not wash every world toward pale blue or add garden vegetation indoors.
 Model detail comes from curved profiles, bevels, seams, folds, eyelids,
 toes, soles and material contrast; tessellation alone is not refinement.
-The user's subsequent geometry request is implemented with denser actor
-surfaces: ModelKit density 1.35 increases curved profiles and bevel rings,
-while scenery stays at density 1. The bare hunter is 28,448 triangles;
-monsters are 1,830-5,032 and bosses 28,564-38,336. These exceed the original
-per-actor recommendations deliberately; the combined scene remains bounded.
+The October rebuild replaces the previous sphere-assembly pass with authored continuous
+profiles, variable-section sweeps and vertex-painted facial regions. Shape and clean
+connections come before polygon count. The rabbit is 17,332 triangles bare and 24,756
+with maximum equipment; bosses stay below 20K. Normal enemies use their own compact
+sampling budget rather than inheriting hero tessellation. Exact measured reports are
+exported with the source; see `docs/ASSET_IDENTITY_MATRIX.md` and `docs/ASSET_REBUILD.md`.
 
 ## 3. Typography
 Preserve Segoe UI / Apple SD Gothic Neo / Noto Sans KR. HUD labels retain
@@ -57,7 +58,15 @@ remain at least 44 px. Announcements wrap within the viewport. Pause must
 freeze gameplay, animation and effects. No decoration may hide a hazard.
 
 ## 8. Evidence and accepted debt
-Actual desktop, portrait, landscape, six-world and twelve-boss captures
-are recorded under the local `.omo/evidence/` directory. Procedural models
-use shared geometry and a fixed 96-particle pool. Three.js remains in the
-main bundle; Vite's 500 kB advisory is not disabled.
+The current revision is verified by unit/integration tests, TypeScript/build/lint,
+94 exact runtime GLB exports, binary/accessor/index checks, and actual Blender pixel
+reviews of characters, equipment, poses, stage architecture, hazards and effects.
+Runtime remains Three.js rasterization with PBR environment lighting and one bounded,
+runner-following soft-shadow atlas; offline Cycles review is not runtime ray tracing.
+
+Browser launch in this executor is blocked by a denied Unix socket operation. No
+new gameplay screenshots, phone FPS or browser playthrough result is claimed. Older
+review documents describe historical tests and must not be mistaken for this run's
+evidence. The manual browser/device acceptance checklist remains open in QA notes.
+The Vite 500 kB advisory remains visible; it is not disabled to manufacture a pass.
+Use the declared pnpm lockfile; the pre-existing npm lockfile is stale and not used by CI.

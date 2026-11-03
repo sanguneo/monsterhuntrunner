@@ -16,7 +16,7 @@ interface BlastFx {
   life: number;
 }
 
-const ringGeo = new THREE.TorusGeometry(1, 0.12, 8, 28);
+const ringGeo = new THREE.TorusGeometry(1, 0.045, 6, 48);
 const ringMat = new THREE.MeshBasicMaterial({ color: 0xffa726, transparent: true, opacity: 0.9 });
 
 export class Combat {

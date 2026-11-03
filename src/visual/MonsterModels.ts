@@ -1,340 +1,1066 @@
 import * as THREE from 'three';
 import type { MonsterDef } from '../data/worlds';
-import { ModelKit, bakeStaticModel, type Vec3 } from './ModelKit';
+import { bakeStaticModel, type Vec3, type Surface } from './ModelKit';
+import { SculptKit, sweepGeometry, type Ring } from './SculptKit';
 
-// Front is -Z. Templates are level-lifetime assets: spawns clone only transforms.
+/** Small enemies use a compact authored mesh budget, independent of hero/boss detail. */
+class MonsterKit extends SculptKit {
+  override loft(
+    color: number,
+    profile: readonly Ring[],
+    position: Vec3 = [0, 0, 0],
+    parent = this.group,
+    surface: Surface = 'cloth',
+    rings = 20,
+    sides = 20,
+  ): THREE.Mesh {
+    return super.loft(color, profile, position, parent, surface, Math.min(rings, 24), Math.min(sides, 20));
+  }
+  override sweep(
+    color: number,
+    points: readonly Vec3[],
+    widths: readonly number[],
+    depths = widths,
+    parent = this.group,
+    surface: Surface = 'cloth',
+    steps = 16,
+  ): THREE.Mesh {
+    return this.mesh(
+      sweepGeometry(points, widths, depths, Math.min(steps, 18), 8),
+      color,
+      [0, 0, 0],
+      [1, 1, 1],
+      parent,
+      surface,
+    );
+  }
+}
+
+// Every species is a deliberately authored silhouette. Front is -Z; pivot is body centre.
 const templates = new Map<string, THREE.Group>();
-const ink = 0x332c46;
-const cream = 0xffedce;
-const pink = 0xf49ba9;
-const bone = 0xe9ddbf;
-
-function orb(k: ModelKit, color: number, p: Vec3, s: Vec3): THREE.Mesh {
-  return k.sphere(color, p, s, k.group, 8);
+const ink = 0x302a42,
+  cream = 0xffecd0,
+  pink = 0xe7a1ac,
+  gold = 0xe0b871,
+  bone = 0xe6d8be;
+const pear = [
+  [-0.46, 0, 0],
+  [-0.41, 0.2, 0.18],
+  [-0.24, 0.3, 0.23],
+  [0.02, 0.29, 0.24],
+  [0.24, 0.34, 0.27],
+  [0.42, 0.25, 0.22],
+  [0.49, 0, 0],
+] as const;
+function head(k: SculptKit, c: number, p: Vec3 = [0, 0, 0], s = 1): THREE.Mesh {
+  const m = k.loft(
+    c,
+    [
+      [-0.24, 0, 0],
+      [-0.21, 0.17, 0.14],
+      [-0.1, 0.29, 0.24],
+      [0.08, 0.3, 0.25],
+      [0.25, 0.22, 0.19],
+      [0.3, 0, 0],
+    ],
+    p,
+  );
+  m.scale.setScalar(s);
+  return m;
 }
-
-function face(k: ModelKit, y: number, z: number, spread = 0.15, scale = 1): void {
+function ears(k: SculptKit, c: number, x = 0.2, y = 0.33, z = 0): void {
   for (const side of [-1, 1]) {
-    orb(k, ink, [side * spread, y, z], [0.065 * scale, 0.087 * scale, 0.038]);
-    orb(k, cream, [side * spread - 0.018 * scale, y + 0.026 * scale, z - 0.033], [0.018 * scale, 0.023 * scale, 0.013]);
-    orb(k, pink, [side * (spread + 0.09 * scale), y - 0.105 * scale, z + 0.025], [0.06 * scale, 0.025 * scale, 0.018]);
+    const ear = k.loft(
+      c,
+      [
+        [0, 0, 0],
+        [0.035, 0.095, 0.055],
+        [0.12, 0.085, 0.045],
+        [0.22, 0.04, 0.025],
+        [0.255, 0, 0],
+      ],
+      [side * x, y - 0.06, z],
+      undefined,
+      'cloth',
+      16,
+      16,
+    );
+    ear.rotation.z = -side * 0.13;
+    const inner = k.loft(
+      0xc39da6,
+      [
+        [0.045, 0, 0],
+        [0.08, 0.045, 0.008],
+        [0.16, 0.035, 0.008],
+        [0.205, 0, 0],
+      ],
+      [side * x, y - 0.06, z - 0.045],
+      undefined,
+      'cloth',
+      10,
+      12,
+    );
+    inner.rotation.z = -side * 0.13;
   }
 }
-
-function tooth(k: ModelKit, x: number, y: number, z: number): void {
-  k.box(cream, [x, y, z], [0.055, 0.075, 0.035], k.group, 0.01);
+function limb(k: SculptKit, c: number, side: number, y = 0.02): void {
+  k.sweep(
+    c,
+    [
+      [side * 0.22, y + 0.12, 0.025],
+      [side * 0.34, y - 0.05, -0.015],
+      [side * 0.37, y - 0.2, -0.09],
+    ],
+    [0.09, 0.075, 0.065, 0.05, 0],
+    [0.08, 0.07, 0.06, 0.045, 0],
+  );
 }
-
-function patch(k: ModelKit, color: number, p: Vec3, size = 0.16): void {
-  k.box(color, p, [size, size * 0.8, 0.022], k.group, 0.012).rotation.z = -0.18;
-  for (const side of [-1, 1]) {
-    k.box(cream, [p[0] + side * size * 0.33, p[1], p[2] - 0.018], [0.022, size * 0.5, 0.015], k.group, 0);
-  }
+function feet(k: SculptKit, c: number): void {
+  for (const side of [-1, 1])
+    k.sweep(
+      c,
+      [
+        [side * 0.16, -0.29, 0.02],
+        [side * 0.17, -0.41, -0.015],
+        [side * 0.17, -0.42, -0.15],
+      ],
+      [0.085, 0.08, 0],
+      [0.075, 0.065, 0],
+      undefined,
+      'cloth',
+      16,
+    );
 }
-
-function silhouette(points: readonly Vec3[]): THREE.Shape {
-  const shape = new THREE.Shape();
-  shape.moveTo(points[0][0], points[0][1]);
-  for (const p of points.slice(1)) shape.lineTo(p[0], p[1]);
-  shape.closePath();
-  return shape;
+function petal(k: SculptKit, c: number, points: readonly Vec3[], w = 0.15, d = 0.035): void {
+  k.sweep(c, points, [0, w, w * 0.6, 0], [0, d, d * 0.8, 0]);
 }
-
-function ear(k: ModelKit, color: number, x: number, y: number, z: number, size = 0.16): void {
-  const s = new THREE.Shape();
-  s.moveTo(-size, 0);
-  s.quadraticCurveTo(-size * 0.8, size, 0, size * 1.65);
-  s.quadraticCurveTo(size * 0.85, size, size, 0);
-  s.quadraticCurveTo(0, -size * 0.3, -size, 0);
-  k.shape(color, s, 0.1, [x, y, z]);
-  orb(k, pink, [x, y + size * 0.5, z - 0.015], [size * 0.4, size * 0.65, 0.018]);
+function patch(k: SculptKit, p: Vec3, c: number): void {
+  const m = k.box(c, p, [0.12, 0.13, 0.014], undefined, 0.025);
+  m.rotation.z = 0.2;
+  for (const x of [-0.04, 0.04])
+    k.tube(
+      cream,
+      [
+        [p[0] + x, p[1] - 0.025, p[2] - 0.009],
+        [p[0] + x + 0.015, p[1] + 0.025, p[2] - 0.009],
+      ],
+      0.006,
+    );
 }
-
-function paws(k: ModelKit, color: number): void {
-  for (const side of [-1, 1]) orb(k, color, [side * 0.2, -0.43, -0.06], [0.15, 0.105, 0.2]);
-}
-
-function skull(k: ModelKit, p: Vec3, size = 0.32): void {
-  k.sphere(bone, p, [size, size * 0.9, size * 0.72], k.group, 12);
-  k.box(bone, [p[0], p[1] - size * 0.64, p[2] - size * 0.2], [size * 1.25, size * 0.55, size], k.group, 0.06);
-  for (const side of [-1, 1]) {
-    orb(k, ink, [p[0] + side * size * 0.39, p[1], p[2] - size * 0.64], [size * 0.27, size * 0.31, 0.037]);
-    orb(k, 0xbe9be7, [p[0] + side * size * 0.4, p[1] + 0.012, p[2] - size * 0.68], [0.028, 0.038, 0.018]);
-    k.box(ink, [p[0] + side * size * 0.18, p[1] - size * 0.71, p[2] - size * 0.72], [0.018, size * 0.25, 0.012], k.group, 0);
-  }
-  orb(k, ink, [p[0], p[1] - size * 0.35, p[2] - size * 0.73], [0.04, 0.035, 0.025]);
-}
-
-function bird(k: ModelKit, color: number, skeletal: boolean): void {
-  k.sphere(color, [0, -0.04, 0.03], [0.24, 0.32, 0.29]);
-  if (skeletal) skull(k, [0, 0.2, -0.12], 0.23);
-  else {
-    k.sphere(color, [0, 0.18, -0.12], [0.28, 0.25, 0.25]);
-    face(k, 0.22, -0.34, 0.105, 0.8);
-  }
-  const beak = k.cylinder(skeletal ? bone : 0xe4ae57, [0, 0.09, -0.45], 0.005, 0.1, 0.24, k.group, 8);
-  beak.rotation.x = -Math.PI / 2;
-  for (const side of [-1, 1]) {
-    const wing = new THREE.Shape();
-    wing.moveTo(0.15, 0.07);
-    wing.bezierCurveTo(0.4, 0.34, 0.63, 0.35, 0.77, 0.2);
-    wing.quadraticCurveTo(0.73, -0.07, 0.59, -0.23);
-    wing.lineTo(0.55, -0.07);
-    wing.lineTo(0.43, -0.27);
-    wing.lineTo(0.39, -0.11);
-    wing.quadraticCurveTo(0.22, -0.2, 0.15, 0.07);
-    const mesh = k.shape(color, wing, 0.055, [0, 0, 0.06]);
-    mesh.rotation.y = side < 0 ? Math.PI : 0;
-    if (side < 0) mesh.position.z += 0.055;
-    for (let i = 0; i < 3; i++) {
-      k.tube(skeletal ? bone : 0x655878, [[side * 0.22, 0.08, 0.025], [side * (0.4 + i * 0.1), 0.13, 0.02], [side * (0.4 + i * 0.12), -0.1 + i * 0.035, 0.02]], 0.022);
-    }
-    orb(k, skeletal ? bone : 0xe4ae57, [side * 0.12, -0.34, -0.025], [0.07, 0.045, 0.13]);
-  }
-  k.shape(color, silhouette([[-0.15, -0.18, 0], [0, -0.48, 0], [0.15, -0.18, 0]]), 0.07, [0, 0, 0.23]);
-}
-
-function canine(k: ModelKit, color: number, undead: boolean): void {
-  k.sphere(color, [0, -0.09, 0.1], [0.29, 0.27, 0.4]);
-  k.sphere(color, [0, 0.15, -0.2], [0.31, 0.29, 0.27]);
-  for (const side of [-1, 1]) {
-    ear(k, color, side * 0.2, 0.3, -0.23, 0.12);
-    for (const z of [-0.2, 0.32]) orb(k, color, [side * 0.22, -0.34, z], [0.105, 0.16, 0.14]);
-  }
-  orb(k, undead ? 0xa5b981 : 0xb5a7a2, [0, 0.055, -0.43], [0.21, 0.13, 0.2]);
-  orb(k, ink, [0, 0.11, -0.59], [0.09, 0.065, 0.052]);
-  face(k, 0.21, -0.41, 0.135, 0.85);
-  k.tube(color, [[0, 0.0, 0.4], [0.12, 0.15, 0.53], [0.24, 0.31, 0.46]], 0.07);
+function canine(k: SculptKit, c: number, undead: boolean): void {
+  // Continuous muzzle / brow / neck / lean torso; the silhouette carries species identity.
+  const body = k.loft(
+    c,
+    [
+      [-0.76, 0, 0, 0, -0.1],
+      [-0.71, 0.095, 0.075, 0, -0.1],
+      [-0.56, 0.14, 0.12, 0, -0.13],
+      [-0.42, 0.215, 0.23, 0, -0.18],
+      [-0.25, 0.21, 0.26, 0, -0.12],
+      [-0.06, 0.19, 0.2, 0, 0.015],
+      [0.19, 0.2, 0.17, 0, 0.02],
+      [0.43, 0.21, 0.19, 0, 0.015],
+      [0.6, 0.13, 0.14, 0, 0.02],
+      [0.66, 0, 0, 0, 0.02],
+    ],
+    undefined,
+    undefined,
+    'cloth',
+    24,
+    20,
+  );
+  body.rotation.x = Math.PI / 2;
   if (undead) {
-    patch(k, 0x957597, [-0.18, 0.3, -0.4], 0.13);
-    tooth(k, 0.12, -0.025, -0.57);
-    k.box(0x774b5b, [0, -0.025, -0.18], [0.58, 0.08, 0.42], k.group, 0.025);
-  } else {
-    for (const side of [-1, 1]) {
-      k.shape(0xafa5a3, silhouette([[0, 0.16, 0], [side * 0.2, -0.1, 0], [side * 0.08, -0.18, 0]]), 0.045, [0, -0.02, -0.28]);
+    for (const side of [-1, 1])
+      k.sweep(
+        0x77624d,
+        [
+          [side * 0.17, 0.3, -0.4],
+          [side * 0.29, 0.19, -0.39],
+          [side * 0.31, -0.02, -0.37],
+          [side * 0.24, -0.07, -0.41],
+        ],
+        [0.05, 0.105, 0.08, 0],
+        [0.025, 0.045, 0.04, 0],
+      );
+  } else ears(k, c, 0.17, 0.36, -0.37);
+  for (const side of [-1, 1]) {
+    const lift = side === -1 ? 0.075 : 0;
+    // Longitudinal leg profiles keep a smooth knee/hock and a closed rounded paw.
+    k.loft(
+      c,
+      [
+        [-0.52 + lift, 0, 0, 0, -0.1],
+        [-0.5 + lift, 0.055, 0.09, 0, -0.1],
+        [-0.45 + lift, 0.06, 0.085, 0, -0.075],
+        [-0.34 + lift, 0.043, 0.05, 0, -0.045],
+        [-0.18, 0.06, 0.065, 0, 0.025],
+        [0.02, 0.09, 0.1, 0, 0.01],
+        [0.09, 0, 0],
+      ],
+      [side * 0.18, 0, -0.29],
+      undefined,
+      'cloth',
+      16,
+      12,
+    );
+    k.loft(
+      c,
+      [
+        [-0.52, 0, 0, 0, -0.06],
+        [-0.5, 0.055, 0.095, 0, -0.06],
+        [-0.44, 0.055, 0.08, 0, -0.035],
+        [-0.32, 0.04, 0.05, 0, 0.07],
+        [-0.17, 0.075, 0.08, 0, -0.045],
+        [0.015, 0.1, 0.11],
+        [0.09, 0, 0],
+      ],
+      [side * 0.18, 0, 0.4],
+      undefined,
+      'cloth',
+      16,
+      12,
+    );
+    k.surfaceEye([side * 0.13, 0.23, -0.59], 0.82);
+  }
+  k.sphere(ink, [0, 0.1, -0.728], [0.067, 0.044, 0.034], undefined, 12, 'eye');
+  k.sweep(
+    undead ? c : 0xa8a3aa,
+    [
+      [0, 0.015, 0.5],
+      [0.12, 0.15, 0.72],
+      [0.3, 0.23, 0.86],
+      [0.43, 0.2, 0.91],
+      [0.52, 0.12, 0.94],
+    ],
+    undead ? [0.065, 0.07, 0.06, 0.035, 0] : [0.09, 0.15, 0.14, 0.095, 0],
+  );
+  k.sweep(
+    cream,
+    [
+      [-0.085, 0.045, -0.66],
+      [0, 0.025, -0.72],
+      [0.085, 0.045, -0.66],
+    ],
+    [0, 0.012, 0],
+  );
+  if (undead) patch(k, [-0.13, 0.28, -0.57], 0xa78b9c);
+  else {
+    // A continuous light throat bib rather than a stack of separate cheek tufts.
+    const pos = body.geometry.getAttribute('position'),
+      colors: number[] = [];
+    for (let i = 0; i < pos.count; i++) {
+      const pale = pos.getZ(i) > 0.045 && pos.getY(i) < 0.1;
+      const col = new THREE.Color(pale ? 0xd5c9b8 : c);
+      colors.push(col.r, col.g, col.b);
+    }
+    body.geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+    const mat = k.material(c).clone();
+    mat.color.setHex(0xffffff);
+    mat.vertexColors = true;
+    body.material = mat;
+  }
+}
+function bird(k: SculptKit, c: number, skeletal = false): void {
+  const body = k.loft(c, [
+    [-0.35, 0, 0],
+    [-0.29, 0.14, 0.17],
+    [-0.05, 0.23, 0.25],
+    [0.2, 0.26, 0.23, 0, -0.08],
+    [0.37, 0.17, 0.16, 0, -0.09],
+    [0.42, 0, 0, 0, -0.08],
+  ]);
+  if (skeletal) {
+    const positions = body.geometry.getAttribute('position'),
+      colors: number[] = [];
+    for (let i = 0; i < positions.count; i++) {
+      const tint = new THREE.Color(positions.getY(i) > 0.045 ? bone : c);
+      colors.push(tint.r, tint.g, tint.b);
+    }
+    body.geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+    const material = k.material(c).clone();
+    material.color.setHex(0xffffff);
+    material.vertexColors = true;
+    body.material = material;
+  }
+  for (const side of [-1, 1]) {
+    k.surfaceEye([side * 0.108, 0.24, -0.292], skeletal ? 1 : 0.83);
+    if (!skeletal) {
+      const wing = new THREE.Shape();
+      wing.moveTo(side * 0.15, 0.13);
+      wing.bezierCurveTo(side * 0.35, 0.42, side * 0.65, 0.44, side * 0.84, 0.23);
+      wing.quadraticCurveTo(side * 0.66, 0.16, side * 0.44, 0.04);
+      wing.quadraticCurveTo(side * 0.27, -0.01, side * 0.15, 0.02);
+      wing.closePath();
+      k.shape(c, wing, 0.035, [0, 0, -0.04]);
+      // Planar overlapping feather vanes: broad curved surfaces, not sweep tubes.
+      for (let i = 0; i < 5; i++) {
+        const sx = side * (0.24 + i * 0.085),
+          sy = 0.21 + i * 0.013,
+          tx = side * (0.43 + i * 0.115),
+          ty = -0.12 + i * 0.045;
+        const dx = tx - sx,
+          dy = ty - sy,
+          len = Math.hypot(dx, dy),
+          nx = (-dy / len) * 0.07,
+          ny = (dx / len) * 0.07;
+        const f = new THREE.Shape();
+        f.moveTo(sx - nx, sy - ny);
+        f.bezierCurveTo(sx + dx * 0.4 - nx, sy + dy * 0.4 - ny, tx - nx, ty - ny, tx, ty);
+        f.bezierCurveTo(tx + nx * 0.3, ty + ny * 0.3, sx + dx * 0.4 + nx, sy + dy * 0.4 + ny, sx + nx, sy + ny);
+        f.closePath();
+        k.shape(i % 2 ? 0x51475f : c, f, 0.018, [0, 0, 0.02 + i * 0.002]);
+      }
+    } else
+      for (let i = 0; i < 3; i++)
+        petal(
+          k,
+          bone,
+          [
+            [side * 0.15, 0.13, 0.02],
+            [side * (0.46 + i * 0.055), 0.17 - i * 0.07, 0.02],
+            [side * (0.69 - i * 0.09), -0.07 - i * 0.08, 0.03],
+          ],
+          0.1 - i * 0.012,
+          0.035,
+        );
+    k.sweep(
+      gold,
+      [
+        [side * 0.1, -0.29, -0.02],
+        [side * 0.12, -0.35, -0.07],
+        [side * 0.12, -0.34, -0.18],
+      ],
+      [0.035, 0.035, 0],
+      undefined,
+      undefined,
+      'cloth',
+      12,
+    );
+  }
+  k.sweep(
+    skeletal ? bone : 0x393140,
+    [
+      [0, 0.13, -0.24],
+      [0, 0.12, -0.4],
+      [0, 0.015, -0.56],
+    ],
+    [0.08, 0.075, 0],
+    [0.055, 0.045, 0],
+  );
+  petal(
+    k,
+    c,
+    [
+      [0, -0.1, 0.15],
+      [0, -0.32, 0.34],
+      [0, -0.37, 0.44],
+    ],
+    0.12,
+    0.025,
+  );
+  if (skeletal) {
+    for (const y of [-0.08, -0.17]) {
+      const points: Vec3[] = [
+        [-0.12, y, 0],
+        [0, y - 0.025, 0],
+        [0.12, y, 0],
+      ].map((p) => {
+        const hit = k.surfacePoint(p as unknown as Vec3);
+        hit.point.addScaledVector(hit.normal, 0.009);
+        return hit.point.toArray() as [number, number, number];
+      });
+      k.sweep(bone, points, [0.012, 0.017, 0.012], undefined, undefined, 'cloth', 12);
     }
   }
 }
-
-const builders: Record<string, (k: ModelKit, color: number) => void> = {
-  bookGhost(k, color) {
-    k.box(color, [0, 0.04, 0.08], [0.74, 0.73, 0.25], k.group, 0.06, 'leather');
-    k.box(cream, [0.04, 0.04, -0.09], [0.65, 0.64, 0.18], k.group, 0.025);
-    k.box(0x946449, [-0.34, 0.04, -0.05], [0.13, 0.77, 0.32], k.group, 0.055, 'leather');
-    for (let i = 0; i < 5; i++) {
-      k.box(0xcbb993, [0.055, -0.18 + i * 0.105, -0.188], [0.57, 0.012, 0.012], k.group, 0);
-    }
-    for (const y of [-0.2, 0.24]) k.box(0xe8b969, [-0.35, y, -0.222], [0.13, 0.045, 0.018], k.group, 0.005, 'metal');
-    k.shape(0xb178a2, silhouette([[0, 0, 0], [0.1, 0, 0], [0.1, -0.21, 0], [0.05, -0.16, 0], [0, -0.21, 0]]), 0.018, [0.2, -0.19, -0.21]);
-    face(k, 0.11, -0.225, 0.145);
-    for (const side of [-1, 1]) k.tube(0xcde6ef, [[side * 0.33, 0.0, 0], [side * 0.48, -0.08, -0.02], [side * 0.5, 0.09, -0.03]], 0.055);
-    k.tube(0xcde6ef, [[0, -0.28, 0.07], [0, -0.45, 0.06], [0.13, -0.5, 0.04], [0.22, -0.43, 0.04]], 0.095);
+function skull(k: SculptKit, p: Vec3 = [0, 0.22, 0], scale = 1): void {
+  const shell = k.loft(
+    bone,
+    [
+      [-0.24, 0, 0],
+      [-0.22, 0.13, 0.1],
+      [-0.14, 0.18, 0.15],
+      [-0.06, 0.27, 0.22],
+      [0.1, 0.3, 0.25],
+      [0.25, 0.22, 0.19],
+      [0.3, 0, 0],
+    ],
+    p,
+  );
+  shell.scale.setScalar(scale);
+  for (const side of [-1, 1]) {
+    k.sphere(
+      ink,
+      [side * 0.11 * scale, p[1] + 0.04 * scale, p[2] - 0.258 * scale],
+      [0.085 * scale, 0.095 * scale, 0.013],
+      undefined,
+      16,
+    );
+    k.surfaceEye([side * 0.11 * scale, p[1] + 0.035 * scale, p[2] - 0.275 * scale], 0.45 * scale, undefined, 0xa591c8);
+  }
+  for (const x of [-0.065, 0, 0.065]) {
+    const hit = k.surfacePoint([x * scale, p[1] - 0.165 * scale, p[2] - 0.2]);
+    const seam = k.box(
+      ink,
+      [hit.point.x, hit.point.y, hit.point.z - 0.004],
+      [0.011, 0.044 * scale, 0.006],
+      undefined,
+      0.003,
+    );
+    seam.userData.facialDetail = true;
+  }
+}
+const builders: Record<string, (k: SculptKit, c: number) => void> = {
+  bookGhost(k, c) {
+    k.box(c, [0, 0.03, 0.015], [0.65, 0.76, 0.25], undefined, 0.055, 'leather');
+    k.box(cream, [0.025, 0.03, -0.116], [0.55, 0.65, 0.09], undefined, 0.025);
+    k.box(0x754b45, [-0.28, 0.03, -0.045], [0.13, 0.77, 0.29], undefined, 0.045, 'leather');
+    for (const y of [-0.24, -0.19, 0.23, 0.28])
+      k.box(gold, [-0.29, y, -0.2], [0.1, 0.022, 0.012], undefined, 0.005, 'metal');
+    for (const side of [-1, 1])
+      petal(
+        k,
+        0xa9dcd6,
+        [
+          [side * 0.28, -0.02, 0],
+          [side * 0.45, -0.06, -0.04],
+          [side * 0.48, 0.08, -0.08],
+        ],
+        0.06,
+        0.035,
+      );
+    k.sweep(
+      0xa9dcd6,
+      [
+        [0, -0.29, 0.04],
+        [0, -0.47, 0.02],
+        [0.14, -0.51, -0.02],
+        [0.22, -0.44, -0.02],
+      ],
+      [0.12, 0.085, 0.04, 0],
+    );
+    k.surfaceFace(0.12, -0.168, 0.13, 0.95);
+    k.box(0xb67999, [0.17, -0.28, -0.18], [0.075, 0.28, 0.014], undefined, 0.015);
+    for (let i = 0; i < 4; i++)
+      k.tube(
+        0xd8c7a8,
+        [
+          [0.01, -0.05 - i * 0.045, -0.166],
+          [0.23, -0.05 - i * 0.045, -0.166],
+        ],
+        0.004,
+      );
   },
-  pencilGhost(k, color) {
-    k.cylinder(color, [0, 0.02, 0], 0.18, 0.18, 0.64, k.group, 6);
-    for (const side of [-1, 1]) k.box(0xe8a339, [side * 0.115, 0.03, -0.142], [0.023, 0.58, 0.024], k.group, 0);
-    k.cylinder(0xb2c6ce, [0, 0.36, 0], 0.19, 0.19, 0.13, k.group, 12, 'metal');
-    for (const y of [0.32, 0.4]) k.torus(0xe0e4db, [0, y, 0], 0.184, 0.012, k.group, 'metal').rotation.x = Math.PI / 2;
-    k.sphere(pink, [0, 0.47, 0], [0.18, 0.13, 0.18]);
-    k.cylinder(0xeac390, [0, -0.4, 0], 0.18, 0.035, 0.23, k.group, 6);
-    k.cylinder(ink, [0, -0.55, 0], 0.048, 0.005, 0.09, k.group, 6);
-    face(k, 0.08, -0.18, 0.09, 0.7);
-    for (const side of [-1, 1]) k.tube(0xd9eaf1, [[side * 0.15, -0.1, 0], [side * 0.3, -0.18, 0], [side * 0.32, -0.02, 0]], 0.047);
+  pencilGhost(k, c) {
+    k.cylinder(c, [0, 0.02, 0], 0.145, 0.145, 0.62, undefined, 6);
+    k.loft(
+      pink,
+      [
+        [0.32, 0.145, 0.145],
+        [0.43, 0.14, 0.14],
+        [0.49, 0.09, 0.09],
+        [0.51, 0, 0],
+      ],
+      undefined,
+      undefined,
+      'cloth',
+      12,
+    );
+    k.cylinder(0xafc5ce, [0, 0.3, 0], 0.153, 0.153, 0.09, undefined, 20, 'metal');
+    k.loft(
+      cream,
+      [
+        [-0.52, 0, 0],
+        [-0.43, 0.06, 0.06],
+        [-0.29, 0.145, 0.145],
+      ],
+      undefined,
+      undefined,
+      'cloth',
+      10,
+      12,
+    );
+    k.loft(
+      ink,
+      [
+        [-0.56, 0, 0],
+        [-0.49, 0.04, 0.04],
+        [-0.46, 0.03, 0.03],
+      ],
+      undefined,
+      undefined,
+      'cloth',
+      8,
+      12,
+    );
+    k.surfaceFace(0.08, -0.148, 0.074, 0.65);
+    for (const side of [-1, 1]) limb(k, 0x9fd5d0, side, -0.03);
   },
   paperGhost(k) {
-    // Two dihedral wings, raised center keel and folded trailing edges: an airplane, not a tetrahedron.
+    // A folded paper manta: curved wings with a clear nose and raised central crease.
     for (const side of [-1, 1]) {
-      const wing = k.shape(cream, silhouette([[0, -0.6, 0], [side * 0.65, 0.38, 0], [side * 0.12, 0.21, 0]]), 0.026, [0, 0, 0]);
+      const s = new THREE.Shape();
+      s.moveTo(0, -0.46);
+      s.bezierCurveTo(side * 0.18, -0.16, side * 0.55, 0.14, side * 0.65, 0.35);
+      s.quadraticCurveTo(side * 0.32, 0.25, side * 0.08, 0.27);
+      s.closePath();
+      const wing = k.shape(cream, s, 0.018, [0, 0, 0]);
       wing.rotation.x = Math.PI / 2;
-      wing.rotation.y = side * 0.16;
-      k.tube(0xa9c6d7, [[0, 0.035, -0.57], [side * 0.23, 0.04, 0.03], [side * 0.57, 0.085, 0.31]], 0.013);
-      k.tube(0xd2dfdf, [[side * 0.1, -0.02, 0.17], [side * 0.35, 0.04, 0.24], [side * 0.61, 0.075, 0.35]], 0.02);
+      wing.rotation.y = side * 0.08;
+      k.tube(
+        0xb8cbd1,
+        [
+          [0, 0.005, -0.45],
+          [side * 0.12, 0.025, 0.04],
+          [side * 0.57, 0.045, 0.31],
+        ],
+        0.007,
+      );
     }
-    const keel = k.shape(0xd2dfdf, silhouette([[-0.58, 0, 0], [0.31, 0.02, 0], [0.2, -0.24, 0]]), 0.03, [0, 0, 0]);
-    keel.rotation.y = -Math.PI / 2;
-    k.shape(cream, silhouette([[-0.18, 0.015, 0], [0.18, 0.015, 0], [0, -0.19, 0]]), 0.04, [0, 0, -0.26]);
-    face(k, -0.035, -0.27, 0.11, 0.75);
-    k.tube(0xd6eaf5, [[0, -0.16, 0.18], [0, -0.27, 0.31], [0.14, -0.26, 0.42]], 0.035);
-  },
-  zombie(k, color) {
-    k.box(0x746083, [0, -0.17, 0.02], [0.51, 0.4, 0.36], k.group, 0.1);
-    k.sphere(color, [0, 0.2, -0.015], [0.33, 0.31, 0.29]);
-    paws(k, 0x494253);
-    for (const side of [-1, 1]) orb(k, color, [side * 0.34, -0.1, -0.1], [0.12, 0.2, 0.15]);
-    face(k, 0.24, -0.29, 0.13);
-    k.box(ink, [0.055, 0.02, -0.28], [0.21, 0.06, 0.025], k.group, 0.02);
-    tooth(k, 0.015, 0.035, -0.3);
-    tooth(k, 0.12, 0.035, -0.3);
-    patch(k, 0xa7b684, [-0.15, 0.38, -0.245], 0.15);
-    patch(k, 0xc09a79, [0.08, -0.19, -0.175]);
-    for (let i = 0; i < 3; i++) k.box(ink, [-0.13 + i * 0.085, 0.48, 0], [0.045, 0.065, 0.12], k.group, 0.015).rotation.z = -0.2;
-  },
-  zombieDog(k, color) { canine(k, color, true); },
-  crow(k) { bird(k, 0x3d364c, false); },
-  wireGolem(k, color) {
-    k.box(color, [0, -0.04, 0], [0.49, 0.55, 0.36], k.group, 0.09, 'metal');
-    k.box(0x374752, [0, 0.23, -0.02], [0.55, 0.27, 0.39], k.group, 0.07, 'metal');
-    face(k, 0.25, -0.22, 0.13, 0.8);
+    k.sweep(
+      0xc7d9df,
+      [
+        [0, 0.01, -0.45],
+        [0, -0.07, 0.02],
+        [0, -0.1, 0.29],
+      ],
+      [0, 0.055, 0],
+      [0, 0.14, 0],
+    );
     for (const side of [-1, 1]) {
-      k.tube(0xc99561, [[side * 0.23, 0.04, 0], [side * 0.4, -0.08, -0.03], [side * 0.39, -0.28, -0.1]], 0.073, k.group, 'metal');
-      orb(k, color, [side * 0.4, -0.29, -0.1], [0.105, 0.11, 0.11]);
-      k.tube(side < 0 ? 0x78d6d0 : 0xe8af5c, [[side * 0.17, 0.13, -0.21], [side * 0.22, -0.1, -0.26], [side * 0.08, -0.23, -0.21]], 0.033);
+      k.sphere(ink, [side * 0.075, 0.026, -0.16], [0.038, 0.008, 0.051], undefined, 12, 'eye');
+      k.sphere(cream, [side * 0.075 - 0.01, 0.035, -0.174], [0.009, 0.004, 0.012], undefined, 8, 'eye');
     }
-    paws(k, 0x425767);
-    k.tube(0xe8af5c, [[-0.15, 0.35, 0], [-0.14, 0.51, 0], [0.11, 0.49, 0], [0.16, 0.35, 0]], 0.032, k.group, 'metal');
-    k.torus(0x91efe2, [0, -0.07, -0.2], 0.092, 0.022, k.group, 'glow');
   },
-  sparkBot(k, color) {
-    k.sphere(color, [0, 0, 0], [0.35, 0.34, 0.3], k.group, 12, 'metal');
-    k.box(ink, [0, 0.08, -0.275], [0.43, 0.18, 0.08], k.group, 0.045, 'metal');
+  zombie(k, c) {
+    k.loft(0x7c668c, pear);
+    head(k, c, [0, 0.23, -0.015], 1.1);
+    feet(k, 0x51435c);
+    for (const side of [-1, 1]) limb(k, c, side, -0.02);
+    k.surfaceFace(0.28, -0.278, 0.135, 0.95);
+    patch(k, [-0.16, 0.4, -0.26], 0xb8c797);
+    patch(k, [0.11, -0.22, -0.22], 0xc5a58a);
+    k.sweep(
+      0x494251,
+      [
+        [-0.19, 0.44, -0.02],
+        [-0.08, 0.53, -0.03],
+        [0.1, 0.49, -0.03],
+      ],
+      [0, 0.055, 0],
+      [0, 0.025, 0],
+    );
+  },
+  zombieDog(k, c) {
+    canine(k, c, true);
+  },
+  crow(k) {
+    bird(k, 0x45405c);
+  },
+  wireGolem(k, c) {
+    k.loft(
+      c,
+      [
+        [-0.34, 0, 0],
+        [-0.3, 0.22, 0.18],
+        [-0.06, 0.27, 0.22],
+        [0.19, 0.27, 0.21],
+        [0.31, 0.19, 0.17],
+        [0.35, 0, 0],
+      ],
+      undefined,
+      undefined,
+      'metal',
+    );
+    k.box(ink, [0, 0.13, -0.205], [0.37, 0.16, 0.04], undefined, 0.055);
     for (const side of [-1, 1]) {
-      orb(k, 0xb5f5e4, [side * 0.11, 0.09, -0.325], [0.046, 0.057, 0.025]);
-      k.cylinder(0x697586, [side * 0.36, 0, 0], 0.1, 0.1, 0.18, k.group, 10, 'metal').rotation.z = Math.PI / 2;
-      k.tube(0xe4b86d, [[side * 0.29, 0.22, 0], [side * 0.4, 0.38, 0], [side * 0.29, 0.49, 0]], 0.037, k.group, 'metal');
-      orb(k, 0x98f3e9, [side * 0.28, 0.5, 0], [0.064, 0.07, 0.065]);
+      k.surfaceEye([side * 0.095, 0.13, -0.232], 0.63, undefined, 0x91dfd4);
+      for (let cable = 0; cable < 3; cable++)
+        k.sweep(
+          cable === 1 ? 0xc3a879 : 0x597785,
+          [
+            [side * 0.2, 0.15, 0.025 + (cable - 1) * 0.035],
+            [side * 0.33, 0.01, 0.01 + (cable - 1) * 0.035],
+            [side * 0.35, -0.17, -0.065 + (cable - 1) * 0.035],
+            [side * 0.3, -0.24, -0.1 + (cable - 1) * 0.035],
+          ],
+          [0.025, 0.026, 0.023, 0],
+          undefined,
+          undefined,
+          'metal',
+          16,
+        );
     }
-    k.torus(0xd7b879, [0, -0.15, -0.26], 0.078, 0.026, k.group, 'metal');
-    k.box(0x425767, [0, -0.35, 0], [0.41, 0.12, 0.28], k.group, 0.04, 'metal');
-    k.tube(0x9feee7, [[-0.09, 0.43, 0], [-0.03, 0.52, 0], [0.025, 0.43, 0], [0.12, 0.52, 0]], 0.018, k.group, 'glow');
+    feet(k, 0x465b70);
+    k.torus(gold, [0, -0.11, -0.222], 0.087, 0.012, undefined, 'metal');
+    k.sweep(
+      0xa9dbd3,
+      [
+        [-0.14, 0.31, 0],
+        [-0.14, 0.46, 0],
+        [0.13, 0.46, 0],
+        [0.14, 0.31, 0],
+      ],
+      [0.024, 0.024, 0.024, 0.024],
+      undefined,
+      undefined,
+      'metal',
+    );
   },
-  drone(k, color) {
-    k.sphere(color, [0, 0.02, 0], [0.3, 0.19, 0.29], k.group, 12, 'metal');
-    k.box(ink, [0, 0.025, -0.255], [0.36, 0.14, 0.07], k.group, 0.035);
-    face(k, 0.045, -0.297, 0.105, 0.7);
+  sparkBot(k, c) {
+    k.loft(
+      c,
+      [
+        [-0.38, 0, 0],
+        [-0.31, 0.19, 0.18],
+        [-0.12, 0.32, 0.27],
+        [0.16, 0.31, 0.27],
+        [0.31, 0.2, 0.18],
+        [0.35, 0, 0],
+      ],
+      undefined,
+      undefined,
+      'metal',
+    );
+    k.box(ink, [0, 0.08, -0.26], [0.43, 0.18, 0.045], undefined, 0.06);
+    for (const side of [-1, 1]) k.surfaceEye([side * 0.105, 0.09, -0.293], 0.7, undefined, 0xb4f3df);
     for (const side of [-1, 1]) {
-      k.box(0x586978, [side * 0.32, 0.07, 0], [0.28, 0.07, 0.09], k.group, 0.02, 'metal');
-      const rotor = k.torus(0x637085, [side * 0.46, 0.12, 0], 0.205, 0.028, k.group, 'metal');
-      rotor.rotation.x = Math.PI / 2;
-      k.cylinder(0xe4c387, [side * 0.46, 0.12, 0], 0.055, 0.055, 0.12, k.group, 8, 'metal');
-      for (const angle of [0, Math.PI / 2]) k.box(0xd7e4df, [side * 0.46, 0.15, 0], [0.34, 0.018, 0.055], k.group, 0.012, 'metal').rotation.y = angle;
-      k.tube(0x586978, [[side * 0.17, -0.1, 0.11], [side * 0.23, -0.25, 0.11], [side * 0.23, -0.25, -0.15]], 0.025, k.group, 'metal');
+      k.sweep(
+        gold,
+        [
+          [side * 0.22, 0.23, 0],
+          [side * 0.32, 0.37, 0],
+          [side * 0.26, 0.49, 0],
+        ],
+        [0.025, 0.025, 0.015],
+        undefined,
+        undefined,
+        'metal',
+      );
+      k.sphere(0xb3e9dd, [side * 0.26, 0.49, 0], [0.04, 0.05, 0.04], undefined, 12, 'glow');
     }
-    orb(k, 0x8aeee3, [0, 0.24, 0], [0.04, 0.05, 0.04]);
+    k.torus(gold, [0, -0.18, -0.235], 0.065, 0.018, undefined, 'metal');
   },
-  pufferfish(k, color) {
-    k.sphere(color, [0, 0.015, 0], [0.38, 0.38, 0.36]);
-    k.sphere(cream, [0, -0.105, -0.125], [0.29, 0.25, 0.26]);
-    for (let row = 0; row < 3; row++) {
-      for (let i = 0; i < 7; i++) {
-        const a = (i + row * 0.5) * Math.PI * 2 / 7;
-        const y = (row - 1) * 0.23;
-        const r = row === 1 ? 0.36 : 0.28;
-        if (Math.cos(a) < -0.45) continue;
-        const spike = k.cylinder(0xffd792, [Math.sin(a) * r, y, Math.cos(a) * r], 0.005, 0.047, 0.16, k.group, 5);
-        spike.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(Math.sin(a), y * 2, Math.cos(a)).normalize());
+  drone(k, c) {
+    k.loft(
+      c,
+      [
+        [-0.2, 0, 0],
+        [-0.16, 0.21, 0.22],
+        [0, 0.31, 0.28],
+        [0.16, 0.24, 0.22],
+        [0.21, 0, 0],
+      ],
+      undefined,
+      undefined,
+      'metal',
+    );
+    k.surfaceFace(0.02, -0.283, 0.105, 0.72);
+    for (const side of [-1, 1]) {
+      k.sweep(
+        0x5c7287,
+        [
+          [side * 0.2, 0.04, 0.03],
+          [side * 0.39, 0.07, 0.02],
+          [side * 0.48, 0.09, 0],
+        ],
+        [0.045, 0.035, 0.025],
+        undefined,
+        undefined,
+        'metal',
+        12,
+      );
+      k.torus(0x5c7287, [side * 0.46, 0.1, 0], 0.2, 0.022, undefined, 'metal').rotation.x = Math.PI / 2;
+      for (const a of [0, Math.PI / 2]) {
+        const p = k.box(0xc9dfd9, [side * 0.46, 0.12, 0], [0.34, 0.018, 0.045], undefined, 0.018, 'metal');
+        p.rotation.y = a;
       }
+      k.sweep(
+        gold,
+        [
+          [side * 0.16, -0.1, 0.08],
+          [side * 0.23, -0.25, 0.08],
+          [side * 0.23, -0.25, -0.13],
+        ],
+        [0.018, 0.018, 0.018],
+        undefined,
+        undefined,
+        'metal',
+        12,
+      );
     }
-    face(k, 0.12, -0.345, 0.145);
-    k.torus(0xda885d, [0, -0.07, -0.39], 0.047, 0.02);
+  },
+  pufferfish(k, c) {
+    k.loft(c, [
+      [-0.36, 0, 0],
+      [-0.3, 0.22, 0.24],
+      [-0.07, 0.36, 0.34],
+      [0.18, 0.33, 0.32],
+      [0.34, 0.22, 0.22],
+      [0.39, 0, 0],
+    ]);
+    k.surfaceFace(0.1, -0.335, 0.14, 1);
+    k.torus(0xd99071, [0, -0.08, -0.339], 0.037, 0.012);
+    for (const side of [-1, 1])
+      petal(
+        k,
+        gold,
+        [
+          [side * 0.29, -0.03, 0.02],
+          [side * 0.46, 0.025, 0.02],
+          [side * 0.51, -0.09, 0.025],
+        ],
+        0.11,
+        0.025,
+      );
+    petal(
+      k,
+      gold,
+      [
+        [0, -0.02, 0.27],
+        [0, 0.02, 0.48],
+        [0, 0.02, 0.58],
+      ],
+      0.13,
+      0.025,
+    );
+    for (let i = 0; i < 10; i++) {
+      const a = (i * Math.PI * 2) / 10;
+      if (Math.cos(a) < -0.4) continue;
+      k.sweep(
+        cream,
+        [
+          [Math.sin(a) * 0.29, 0.13, Math.cos(a) * 0.29],
+          [Math.sin(a) * 0.39, 0.18, Math.cos(a) * 0.39],
+        ],
+        [0.035, 0],
+        undefined,
+        undefined,
+        'cloth',
+        8,
+      );
+    }
+  },
+  sharkFin(k, c) {
+    const body = k.loft(
+      c,
+      [
+        [-0.78, 0, 0],
+        [-0.7, 0.13, 0.095],
+        [-0.53, 0.22, 0.18],
+        [-0.23, 0.23, 0.21],
+        [0.07, 0.18, 0.17],
+        [0.38, 0.1, 0.105],
+        [0.68, 0.035, 0.055],
+        [0.75, 0, 0],
+      ],
+      undefined,
+      undefined,
+      'cloth',
+      24,
+      20,
+    );
+    body.rotation.x = Math.PI / 2;
+    const positions = body.geometry.getAttribute('position'),
+      colors: number[] = [];
+    for (let i = 0; i < positions.count; i++) {
+      const col = new THREE.Color(positions.getZ(i) > 0.055 ? 0xd9e3df : c);
+      colors.push(col.r, col.g, col.b);
+    }
+    body.geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+    const mat = k.material(c).clone();
+    mat.color.setHex(0xffffff);
+    mat.vertexColors = true;
+    body.material = mat;
     for (const side of [-1, 1]) {
-      const fin = orb(k, 0xf6bc72, [side * 0.41, -0.025, 0], [0.16, 0.13, 0.05]);
-      fin.rotation.z = side * 0.3;
+      k.surfaceEye([side * 0.15, 0.085, -0.59], 0.86);
+      const fin = new THREE.Shape();
+      fin.moveTo(side * 0.15, -0.05);
+      fin.quadraticCurveTo(side * 0.4, 0.03, side * 0.58, 0.3);
+      fin.quadraticCurveTo(side * 0.31, 0.28, side * 0.13, 0.14);
+      fin.closePath();
+      const mesh = k.shape(c, fin, 0.023, [0, -0.08, -0.1]);
+      mesh.rotation.x = Math.PI / 2;
+      for (let i = 0; i < 3; i++)
+        k.sweep(
+          0x536f85,
+          [
+            [side * 0.213, 0.035, -0.28 + i * 0.065],
+            [side * 0.216, -0.035, -0.27 + i * 0.065],
+            [side * 0.193, -0.09, -0.25 + i * 0.065],
+          ],
+          [0.005, 0.007, 0],
+          undefined,
+          undefined,
+          'cloth',
+          8,
+        );
     }
-    k.shape(0xf6bc72, silhouette([[-0.15, 0.14, 0], [0, 0, 0], [-0.15, -0.14, 0]]), 0.06, [0.1, 0, 0.39]).rotation.y = Math.PI / 2;
+    const dorsal = new THREE.Shape();
+    dorsal.moveTo(-0.21, 0);
+    dorsal.bezierCurveTo(-0.12, 0.14, -0.13, 0.34, -0.1, 0.39);
+    dorsal.quadraticCurveTo(0.03, 0.22, 0.28, 0);
+    dorsal.closePath();
+    k.shape(c, dorsal, 0.03, [0, 0.17, 0.02]).rotation.y = -Math.PI / 2;
+    const tail = new THREE.Shape();
+    tail.moveTo(-0.07, 0);
+    tail.quadraticCurveTo(0.06, 0.15, 0.18, 0.34);
+    tail.quadraticCurveTo(0.19, 0.13, 0.08, 0);
+    tail.quadraticCurveTo(0.22, -0.12, 0.15, -0.29);
+    tail.quadraticCurveTo(0.025, -0.12, -0.07, 0);
+    tail.closePath();
+    k.shape(c, tail, 0.027, [0, 0, 0.7]).rotation.y = -Math.PI / 2;
+    const smile: Vec3[] = [
+      [-0.095, -0.085, 0],
+      [0, -0.115, 0],
+      [0.095, -0.085, 0],
+    ].map((p) => {
+      const h = k.surfacePoint([p[0], p[1], p[2]]);
+      h.point.addScaledVector(h.normal, 0.004);
+      return h.point.toArray() as Vec3;
+    });
+    k.sweep(ink, smile, [0, 0.009, 0]);
   },
-  sharkFin(k, color) {
-    k.sphere(color, [0, 0, 0], [0.27, 0.25, 0.48]);
-    k.sphere(0xd7e4df, [0, -0.105, -0.13], [0.23, 0.15, 0.37]);
-    const dorsal = k.shape(color, silhouette([[-0.2, 0, 0], [0.12, 0.34, 0], [0.18, 0, 0]]), 0.055, [0, 0.18, 0]);
-    dorsal.rotation.y = Math.PI / 2;
+  jellyfish(k, c) {
+    k.loft(
+      c,
+      [
+        [0, 0, 0],
+        [0.015, 0.31, 0.31],
+        [0.08, 0.37, 0.35],
+        [0.27, 0.29, 0.28],
+        [0.42, 0.14, 0.14],
+        [0.45, 0, 0],
+      ],
+      undefined,
+      undefined,
+      'cloth',
+      24,
+    );
+    k.surfaceFace(0.21, -0.303, 0.13, 0.8);
+    for (let i = 0; i < 7; i++) {
+      const a = (i * Math.PI * 2) / 7,
+        x = Math.sin(a) * 0.23,
+        z = Math.cos(a) * 0.23;
+      k.sweep(
+        i % 2 ? 0xc8b9e7 : 0xf1c1d6,
+        [
+          [x, 0.03, z],
+          [x * 1.05, -0.16, z],
+          [x * 0.6 + 0.06, -0.34, z + 0.02],
+          [x + 0.07, -0.46, z],
+        ],
+        [0.035, 0.029, 0.022, 0],
+      );
+    }
+  },
+  ghoul(k, c) {
+    k.loft(0x686080, pear);
+    head(k, c, [0, 0.2, -0.09], 0.88);
+    k.surfaceFace(0.24, -0.31, 0.12, 0.85);
     for (const side of [-1, 1]) {
-      const fin = k.shape(color, silhouette([[0, 0, 0], [side * 0.4, -0.17, 0], [side * 0.1, -0.22, 0]]), 0.045, [side * 0.16, -0.06, 0.01]);
-      fin.rotation.x = 0.7;
-      for (let i = 0; i < 3; i++) k.box(0x466278, [side * 0.244, 0.02, -0.09 + i * 0.067], [0.012, 0.1, 0.018], k.group, 0);
+      limb(k, 0x686080, side);
+      k.sweep(
+        cream,
+        [
+          [side * 0.06, 0.07, -0.3],
+          [side * 0.06, 0.025, -0.3],
+        ],
+        [0.021, 0],
+        undefined,
+        undefined,
+        'cloth',
+        8,
+      );
     }
-    k.sphere(color, [0, 0, 0.43], [0.09, 0.09, 0.19]);
-    const tail = k.shape(color, silhouette([[0, 0, 0], [-0.08, 0.26, 0], [0.18, 0.13, 0], [0.12, 0, 0], [0.19, -0.15, 0], [-0.06, -0.19, 0]]), 0.055, [0, 0, 0.62]);
-    tail.rotation.y = Math.PI / 2;
-    face(k, 0.06, -0.445, 0.115, 0.8);
-    k.tube(ink, [[-0.13, -0.09, -0.43], [0, -0.14, -0.48], [0.13, -0.09, -0.43]], 0.015);
-    tooth(k, -0.065, -0.125, -0.465);
-    tooth(k, 0.065, -0.125, -0.465);
+    k.sweep(
+      0x686080,
+      [
+        [0, -0.31, 0.03],
+        [0.02, -0.48, 0.06],
+        [0.19, -0.5, 0.04],
+      ],
+      [0.18, 0.09, 0],
+    );
+    patch(k, [0.08, -0.2, -0.22], 0xa79691);
   },
-  jellyfish(k, color) {
-    k.lathe(color, [[0, 0.47], [0.14, 0.45], [0.3, 0.34], [0.39, 0.16], [0.4, 0.02], [0.34, -0.025], [0, 0.015]], [0, 0, 0]);
-    k.torus(0xf9cddb, [0, 0.025, 0], 0.365, 0.045).rotation.x = Math.PI / 2;
-    for (let i = 0; i < 6; i++) {
-      const a = i * Math.PI / 3;
-      const x = Math.cos(a) * 0.24;
-      const z = Math.sin(a) * 0.23;
-      k.tube(i % 2 ? 0xc5b0e8 : 0xf2b9d3, [[x, 0.02, z], [x * 1.1, -0.19, z], [x * 0.7 + 0.07, -0.37, z + 0.03], [x + 0.09, -0.49, z]], 0.033);
-    }
-    face(k, 0.2, -0.345, 0.14, 0.9);
-    for (const side of [-1, 1]) orb(k, cream, [side * 0.19, 0.34, -0.235], [0.035, 0.023, 0.018]);
+  wolf(k, c) {
+    canine(k, c, false);
   },
-  ghoul(k, color) {
-    k.lathe(0x5e546f, [[0, -0.42], [0.3, -0.4], [0.25, -0.08], [0.32, 0.12], [0.2, 0.28], [0, 0.3]], [0, 0, 0]);
-    k.sphere(0x514960, [0, 0.23, 0], [0.34, 0.33, 0.28]);
-    k.sphere(color, [0, 0.22, -0.18], [0.255, 0.24, 0.17]);
-    face(k, 0.24, -0.35, 0.12, 0.9);
-    for (const side of [-1, 1]) {
-      k.tube(0x5e546f, [[side * 0.21, 0.02, 0], [side * 0.35, -0.09, -0.08], [side * 0.38, -0.23, -0.17]], 0.085);
-      orb(k, color, [side * 0.38, -0.25, -0.17], [0.1, 0.12, 0.075]);
-      tooth(k, side * 0.08, 0.025, -0.325);
-    }
-    k.tube(0xb6a688, [[-0.18, 0.06, -0.24], [0, -0.04, -0.29], [0.18, 0.06, -0.24]], 0.025);
-    patch(k, 0x938474, [0.09, -0.24, -0.235], 0.14);
-  },
-  wolf(k, color) { canine(k, color, false); },
   bat(k) {
-    k.sphere(0x635174, [0, 0, 0], [0.21, 0.3, 0.2]);
-    k.sphere(0x756184, [0, 0.2, -0.045], [0.245, 0.22, 0.21]);
+    k.loft(0x746080, pear).scale.set(0.7, 0.8, 0.75);
+    ears(k, 0x746080, 0.13, 0.27, -0.03);
+    k.surfaceFace(0.18, -0.197, 0.09, 0.75);
     for (const side of [-1, 1]) {
-      ear(k, 0x635174, side * 0.145, 0.32, -0.06, 0.115);
-      const wing = new THREE.Shape();
-      wing.moveTo(0.16, 0.07);
-      wing.quadraticCurveTo(0.38, 0.36, 0.72, 0.25);
-      wing.lineTo(0.77, -0.12);
-      wing.quadraticCurveTo(0.56, 0.0, 0.53, -0.27);
-      wing.quadraticCurveTo(0.36, -0.1, 0.25, -0.3);
-      wing.quadraticCurveTo(0.24, -0.07, 0.16, 0.07);
-      const membrane = k.shape(0x9c729b, wing, 0.04, [0, 0, side < 0 ? 0.055 : 0.015]);
-      membrane.rotation.y = side < 0 ? Math.PI : 0;
-      k.tube(0x635174, [[side * 0.17, 0.09, -0.005], [side * 0.39, 0.26, -0.005], [side * 0.7, 0.24, -0.005], [side * 0.75, -0.1, -0.005]], 0.028);
-      k.tube(0x635174, [[side * 0.39, 0.26, -0.012], [side * 0.48, 0.0, -0.012], [side * 0.53, -0.25, -0.012]], 0.017);
-      tooth(k, side * 0.055, 0.005, -0.22);
+      const w = new THREE.Shape();
+      w.moveTo(side * 0.13, 0.1);
+      w.bezierCurveTo(side * 0.37, 0.35, side * 0.56, 0.36, side * 0.74, 0.2);
+      w.quadraticCurveTo(side * 0.72, 0.04, side * 0.69, -0.12);
+      w.quadraticCurveTo(side * 0.51, 0.06, side * 0.47, -0.23);
+      w.quadraticCurveTo(side * 0.3, -0.05, side * 0.22, -0.23);
+      w.quadraticCurveTo(side * 0.18, -0.03, side * 0.13, 0.1);
+      k.shape(0xa284ac, w, 0.025, [0, 0, 0.04]);
+      k.sweep(
+        0x746080,
+        [
+          [side * 0.12, 0.1, 0.02],
+          [side * 0.36, 0.29, 0.02],
+          [side * 0.57, 0.3, 0.02],
+          [side * 0.73, 0.2, 0.02],
+        ],
+        [0.025, 0.024, 0.019, 0],
+      );
+      k.sweep(
+        cream,
+        [
+          [side * 0.043, 0.045, -0.2],
+          [side * 0.043, -0.015, -0.2],
+        ],
+        [0.018, 0],
+        undefined,
+        undefined,
+        'cloth',
+        8,
+      );
     }
-    face(k, 0.2, -0.24, 0.105, 0.8);
   },
   boneGolem(k) {
-    k.box(0x837591, [0, -0.07, 0], [0.45, 0.43, 0.31], k.group, 0.06);
-    skull(k, [0, 0.25, -0.01], 0.3);
-    for (const side of [-1, 1]) {
-      orb(k, bone, [side * 0.34, 0.01, 0], [0.14, 0.15, 0.15]);
-      k.cylinder(bone, [side * 0.38, -0.19, 0], 0.075, 0.1, 0.29, k.group, 8);
-      orb(k, bone, [side * 0.38, -0.32, -0.04], [0.12, 0.11, 0.14]);
-    }
-    for (const y of [-0.02, -0.13, -0.24]) k.tube(bone, [[-0.2, y + 0.035, -0.17], [0, y - 0.015, -0.23], [0.2, y + 0.035, -0.17]], 0.045);
-    k.box(bone, [0, -0.12, -0.23], [0.06, 0.34, 0.05], k.group, 0.015);
-    paws(k, bone);
+    // Open broad skeletal frame: negative space between ribs, not painted stripes on a bean.
+    k.sweep(
+      0xaaa0ac,
+      [
+        [0, -0.33, 0.06],
+        [0, -0.07, 0.07],
+        [0, 0.18, 0.04],
+      ],
+      [0.065, 0.07, 0.06],
+      undefined,
+      undefined,
+      'cloth',
+      12,
+    );
+    for (const side of [-1, 1])
+      k.sweep(
+        bone,
+        [
+          [0, 0.1, 0.025],
+          [side * 0.17, 0.16, 0.035],
+          [side * 0.28, 0.1, 0.025],
+        ],
+        [0.045, 0.055, 0.035],
+        undefined,
+        undefined,
+        'cloth',
+        12,
+      );
+    skull(k, [0, 0.25, -0.01], 1.05);
+    feet(k, bone);
+    for (const side of [-1, 1]) limb(k, bone, side, -0.02);
+    for (const y of [-0.035, -0.14, -0.24])
+      for (const side of [-1, 1])
+        k.sweep(
+          bone,
+          [
+            [0, y, 0.06],
+            [side * 0.17, y + 0.025, 0.05],
+            [side * 0.25, y, -0.06],
+            [side * 0.18, y - 0.04, -0.17],
+            [0, y - 0.065, -0.19],
+          ],
+          [0.024, 0.035, 0.037, 0.03, 0.022],
+          undefined,
+          undefined,
+          'cloth',
+          16,
+        );
   },
   skeletonSoldier(k) {
-    skull(k, [0, 0.27, -0.01], 0.27);
-    k.cylinder(bone, [0, -0.1, 0], 0.035, 0.04, 0.35, k.group, 8);
-    for (const y of [-0.025, -0.12]) k.tube(bone, [[-0.18, y + 0.025, 0], [-0.15, y - 0.03, -0.12], [0, y - 0.05, -0.15], [0.18, y + 0.025, 0]], 0.031);
-    k.box(bone, [0, -0.26, 0], [0.31, 0.12, 0.19], k.group, 0.04);
+    skull(k, [0, 0.25, 0], 0.92);
+    k.sweep(
+      bone,
+      [
+        [0, 0.03, 0],
+        [0, -0.29, 0],
+      ],
+      [0.045, 0.045],
+      undefined,
+      undefined,
+      'cloth',
+      8,
+    );
     for (const side of [-1, 1]) {
-      k.tube(bone, [[side * 0.17, 0.015, 0], [side * 0.27, -0.1, -0.02], [side * 0.29, -0.22, -0.1]], 0.042);
-      k.cylinder(bone, [side * 0.11, -0.38, 0], 0.04, 0.04, 0.2, k.group, 8);
-      orb(k, bone, [side * 0.11, -0.48, -0.05], [0.083, 0.06, 0.13]);
+      limb(k, bone, side, -0.03);
+      k.sweep(
+        bone,
+        [
+          [side * 0.12, -0.23, 0],
+          [side * 0.13, -0.42, -0.04],
+          [side * 0.13, -0.45, -0.14],
+        ],
+        [0.045, 0.04, 0],
+        undefined,
+        undefined,
+        'cloth',
+        12,
+      );
     }
-    k.box(0x8c849d, [0, 0.47, 0.015], [0.51, 0.09, 0.34], k.group, 0.035, 'metal');
-    k.box(0xb4bec4, [0.34, -0.01, -0.16], [0.06, 0.46, 0.04], k.group, 0.015, 'metal').rotation.z = -0.12;
-    k.box(0xbb975c, [0.315, -0.19, -0.16], [0.18, 0.035, 0.05], k.group, 0.01, 'metal');
+    for (const y of [-0.06, -0.16])
+      k.sweep(
+        bone,
+        [
+          [-0.16, y, 0],
+          [0, y - 0.025, -0.13],
+          [0.16, y, 0],
+        ],
+        [0.019, 0.025, 0.019],
+        undefined,
+        undefined,
+        'cloth',
+        12,
+      );
+    k.loft(
+      0x8695a9,
+      [
+        [0.44, 0.285, 0.24],
+        [0.53, 0.24, 0.205],
+        [0.62, 0, 0],
+      ],
+      undefined,
+      undefined,
+      'metal',
+      10,
+    );
+    k.sweep(
+      0xc2d1d4,
+      [
+        [0.32, -0.22, -0.13],
+        [0.32, 0.22, -0.13],
+        [0.32, 0.3, -0.13],
+      ],
+      [0.027, 0.027, 0],
+      [0.018, 0.018, 0],
+      undefined,
+      'metal',
+      12,
+    );
+    k.box(gold, [0.32, -0.16, -0.13], [0.16, 0.025, 0.05], undefined, 0.01, 'metal');
   },
-  skullBird(k) { bird(k, 0x7a6d85, true); },
+  skullBird(k) {
+    bird(k, 0x82778e, true);
+  },
 };
-
 export function createMonsterModel(def: Pick<MonsterDef, 'id' | 'color'>): THREE.Group {
-  let template = templates.get(def.id);
+  const key = `${def.id}:${def.color}`;
+  let template = templates.get(key);
   if (!template) {
     const build = builders[def.id];
     if (!build) throw new Error(`Unknown monster model: ${def.id}`);
-    const kit = new ModelKit(1.35);
-    kit.group.name = def.id;
-    build(kit, def.color);
-    template = bakeStaticModel(kit.group);
-    templates.set(def.id, template);
+    const k = new MonsterKit();
+    k.group.name = def.id;
+    build(k, def.color);
+    template = bakeStaticModel(k.group);
+    templates.set(key, template);
   }
   return template.clone(true);
 }

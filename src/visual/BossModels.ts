@@ -1,443 +1,1364 @@
 import * as THREE from 'three';
-import { ModelKit, bakeStaticModel, type Vec3, type Surface } from './ModelKit';
+import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { SculptKit, loftGeometry } from './SculptKit';
+import { bakeStaticModel, type Vec3, type Surface } from './ModelKit';
 
-// Standing local pivot at the feet, facing -Z. Every call owns its baked resources.
-const ink = 0x302940;
-const cream = 0xffedce;
-const bone = 0xe8d9b8;
-const gold = 0xd9ab60;
-const silver = 0xa8bfca;
-const blush = 0xe89aa7;
-
-function round(k: ModelKit, color: number, p: Vec3, s: Vec3, surface: Surface = 'cloth'): THREE.Mesh {
-  return k.sphere(color, p, s, k.group, 24, surface);
+// Twelve authored silhouettes. Feet pivot at Y=0, faces towards -Z.
+// Fresh material/geometry ownership on every call preserves encounter fading/disposal.
+const ink = 0x30283f,
+  cream = 0xf8e9cf,
+  bone = 0xe1d3b5,
+  gold = 0xd5ac68,
+  silver = 0xa3bcc7;
+function dot(k: SculptKit, c: number, p: Vec3, s: Vec3, surface: Surface = 'cloth'): THREE.Mesh {
+  return k.sphere(c, p, s, k.group, 16, surface);
 }
-function bead(k: ModelKit, color: number, p: Vec3, s: Vec3, surface: Surface = 'cloth'): THREE.Mesh {
-  return k.sphere(color, p, s, k.group, 12, surface);
+function curve(k: SculptKit, c: number, p: readonly Vec3[], r = 0.018, surface: Surface = 'cloth'): void {
+  k.sweep(c, p, [r, r, r], undefined, undefined, surface, 16);
 }
-function profile(points: readonly (readonly [number, number])[]): THREE.Shape {
+function panel(
+  k: SculptKit,
+  c: number,
+  points: readonly (readonly [number, number])[],
+  p: Vec3,
+  depth = 0.035,
+  surface: Surface = 'cloth',
+): THREE.Mesh {
   const s = new THREE.Shape();
   s.moveTo(...points[0]);
-  points.slice(1).forEach(p => s.lineTo(...p));
+  for (const v of points.slice(1)) s.lineTo(...v);
   s.closePath();
-  return s;
+  return k.shape(c, s, depth, p, undefined, surface);
 }
-function face(k: ModelKit, y: number, z: number, spread = 0.22, sleepy = false): void {
+function head(k: SculptKit, c: number, y = 2.5, w = 0.51, h = 0.52, depth = 0.4): void {
+  const mesh = k.loft(
+    c,
+    [
+      [-1, 0, 0],
+      [-0.88, 0.48, 0.53],
+      [-0.55, 0.91, 0.87],
+      [0, 1, 1],
+      [0.6, 0.88, 0.86],
+      [0.93, 0.5, 0.47],
+      [1, 0, 0],
+    ],
+    [0, y, 0],
+    undefined,
+    'cloth',
+    28,
+    28,
+  );
+  mesh.scale.set(w, h, depth);
+}
+function face(k: SculptKit, y = 2.54, depth = 0.4, spacing = 0.2, scale = 1, angry = false): void {
   for (const side of [-1, 1]) {
-    bead(k, ink, [side * spread, y, z], [0.11, sleepy ? 0.105 : 0.145, 0.055], 'eye');
-    bead(k, cream, [side * spread - 0.027, y + 0.05, z - 0.043], [0.032, 0.038, 0.02], 'eye');
-    bead(k, blush, [side * (spread + 0.15), y - 0.16, z + 0.035], [0.105, 0.044, 0.025]);
-    k.tube(ink, [[side * (spread - 0.09), y + 0.22, z + 0.045], [side * spread, y + 0.25, z + 0.04], [side * (spread + 0.08), y + 0.21, z + 0.065]], 0.021);
+    const eye = new THREE.Group();
+    eye.position.set(side * spacing, y, -depth * 0.94);
+    eye.rotation.y = -side * 0.22;
+    k.group.add(eye);
+    k.sphere(0xf4eee1, [0, 0, 0], [0.113 * scale, 0.15 * scale, 0.027], eye, 16, 'eye');
+    k.sphere(0x79604c, [0.008 * side, 0, -0.023], [0.081 * scale, 0.113 * scale, 0.018], eye, 16, 'eye');
+    k.sphere(ink, [0.01 * side, 0, -0.039], [0.049 * scale, 0.078 * scale, 0.012], eye, 16, 'eye');
+    k.sphere(cream, [-0.025 * scale, 0.045 * scale, -0.05], [0.025 * scale, 0.032 * scale, 0.008], eye, 10, 'eye');
+    dot(
+      k,
+      0xe3a4a4,
+      [side * (spacing + 0.15 * scale), y - 0.14 * scale, -depth * 0.83],
+      [0.073 * scale, 0.025 * scale, 0.013],
+    );
+    curve(
+      k,
+      ink,
+      [
+        [side * (spacing - 0.075), y + 0.2, -depth * 0.8],
+        [side * spacing, y + (angry ? 0.18 : 0.22), -depth * 0.84],
+        [side * (spacing + 0.075), y + 0.22, -depth * 0.77],
+      ],
+      0.014,
+    );
   }
-  k.tube(ink, [[-0.09, y - 0.2, z + 0.015], [0, y - 0.225, z - 0.005], [0.09, y - 0.2, z + 0.015]], 0.019);
+  curve(
+    k,
+    ink,
+    [
+      [-0.07, y - 0.2, -depth * 0.96],
+      [0, y - 0.225, -depth * 0.98],
+      [0.07, y - 0.2, -depth * 0.96],
+    ],
+    0.012,
+  );
 }
-function hand(k: ModelKit, color: number, x: number, y: number, z: number, claws = false): void {
-  round(k, color, [x, y, z], [0.21, 0.24, 0.19]);
-  for (let i = 0; i < 3; i++) {
-    const fx = x + (i - 1) * 0.11;
-    bead(k, color, [fx, y - 0.12, z - 0.075], [0.075, 0.14, 0.1]);
-    if (claws) {
-      const nail = k.cylinder(cream, [fx, y - 0.255, z - 0.09], 0.055, 0.007, 0.15, k.group, 8);
-      nail.rotation.x = -0.24;
+function hand(k: SculptKit, c: number, x: number, y: number, z: number): void {
+  k.loft(
+    c,
+    [
+      [-0.18, 0, 0],
+      [-0.15, 0.09, 0.07],
+      [-0.05, 0.13, 0.09],
+      [0.09, 0.105, 0.085],
+      [0.14, 0, 0],
+    ],
+    [x, y, z],
+    undefined,
+    'cloth',
+    16,
+    16,
+  );
+  for (const dx of [-0.035, 0.035])
+    curve(
+      k,
+      new THREE.Color(c).multiplyScalar(0.73).getHex(),
+      [
+        [x + dx, y - 0.12, z - 0.076],
+        [x + dx, y - 0.055, z - 0.088],
+      ],
+      0.005,
+    );
+}
+/** Extrude arm rings directly from shoulder openings in the torso grid.
+ * Shared boundary vertices produce a genuinely continuous shoulder surface. */
+function connectedSleeves(k: SculptKit, cloth: number, y: number, width: number, thickness: number): [Vec3, Vec3] {
+  const torso = [...k.group.children]
+    .reverse()
+    .find(
+      (o): o is THREE.Mesh =>
+        o instanceof THREE.Mesh &&
+        o.material instanceof THREE.MeshStandardMaterial &&
+        o.material.color.getHex() === cloth &&
+        o.geometry.getAttribute('position').count % 29 === 0 &&
+        o.geometry.getAttribute('position').count > 800,
+    );
+  if (!torso) throw new Error(`Missing authored torso grid for ${k.group.name}`);
+  const geometry = torso.geometry,
+    sides = 28,
+    rowSize = sides + 1;
+  const source = geometry.getAttribute('position'),
+    sourceUV = geometry.getAttribute('uv');
+  const positions = Array.from(source.array),
+    uv = Array.from(sourceUV.array),
+    indices: number[] = [];
+  const rows = source.count / rowSize - 1;
+  const rowAt = (height: number) => {
+    let best = 1;
+    for (let r = 1; r < rows; r++)
+      if (Math.abs(source.getY(r * rowSize) - height) < Math.abs(source.getY(best * rowSize) - height)) best = r;
+    return best;
+  };
+  const low = rowAt(y - 0.12),
+    high = Math.max(low + 2, Math.min(rows - 1, rowAt(y + 0.14)));
+  const openings = [
+    { side: 1, from: 5, to: 9 },
+    { side: -1, from: 19, to: 23 },
+  ];
+  for (let row = 0; row < rows; row++)
+    for (let col = 0; col < sides; col++) {
+      if (row >= low && row < high && openings.some((o) => col >= o.from && col < o.to)) continue;
+      const a = row * rowSize + col,
+        b = a + rowSize;
+      indices.push(a, a + 1, b, a + 1, b + 1, b);
+    }
+  const wrists: Vec3[] = [];
+  for (const opening of openings) {
+    const { side, from, to } = opening,
+      boundary: number[] = [];
+    for (let i = from; i <= to; i++) boundary.push(low * rowSize + i);
+    for (let j = low + 1; j <= high; j++) boundary.push(j * rowSize + to);
+    for (let i = to - 1; i >= from; i--) boundary.push(high * rowSize + i);
+    for (let j = high - 1; j > low; j--) boundary.push(j * rowSize + from);
+    const center = new THREE.Vector3();
+    for (const index of boundary) center.add(new THREE.Vector3().fromBufferAttribute(source, index));
+    center.divideScalar(boundary.length);
+    const id = k.group.name;
+    const expressive = (id === 'dracula' || id === 'seaWitch' || id === 'skullKing') && side === 1;
+    const wrist: Vec3 = [
+      side * (width + (expressive ? 0.18 : 0.22)),
+      y - (expressive ? 0.38 : 0.52) + (side === 1 ? 0.025 : -0.025),
+      expressive ? -0.24 : -0.12,
+    ];
+    const path = new THREE.CatmullRomCurve3(
+      [
+        center,
+        new THREE.Vector3(side * (width + 0.08), y - 0.04, 0.005),
+        new THREE.Vector3(side * (width + 0.24), y - 0.29, -0.075),
+        new THREE.Vector3(...wrist),
+      ],
+      false,
+      'centripetal',
+    );
+    const steps = 14,
+      frames = path.computeFrenetFrames(steps, false),
+      angles = boundary.map((index) => {
+        const d = new THREE.Vector3().fromBufferAttribute(source, index).sub(center);
+        return Math.atan2(d.dot(frames.binormals[0]), d.dot(frames.normals[0]));
+      });
+    let previous = boundary;
+    for (let ring = 1; ring <= steps; ring++) {
+      const t = ring / steps,
+        c = path.getPointAt(t),
+        radius = thickness * (1 - 0.3 * t),
+        current: number[] = [];
+      for (let i = 0; i < boundary.length; i++) {
+        const angle = angles[i];
+        const p = c
+          .clone()
+          .addScaledVector(frames.normals[ring], Math.cos(angle) * radius)
+          .addScaledVector(frames.binormals[ring], Math.sin(angle) * radius * 0.9);
+        if (ring === 1) {
+          const start = new THREE.Vector3().fromBufferAttribute(source, boundary[i]);
+          const shift = c.clone().sub(center);
+          p.lerp(start.add(shift), 0.35);
+        }
+        current.push(positions.length / 3);
+        positions.push(p.x, p.y, p.z);
+        uv.push(i / boundary.length, t);
+      }
+      for (let i = 0; i < boundary.length; i++) {
+        const next = (i + 1) % boundary.length;
+        indices.push(previous[i], previous[next], current[i], previous[next], current[next], current[i]);
+      }
+      previous = current;
+    }
+    // Close sleeve cuffs: the skin wrist overlaps this cap, never an exposed tube.
+    const cap = positions.length / 3;
+    positions.push(...wrist);
+    uv.push(0.5, 1);
+    for (let i = 0; i < previous.length; i++) indices.push(previous[i], previous[(i + 1) % previous.length], cap);
+    wrists.push(wrist);
+  }
+  const merged = new THREE.BufferGeometry();
+  merged.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  merged.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  merged.setIndex(indices);
+  merged.computeVertexNormals();
+  torso.geometry = merged;
+  geometry.dispose();
+  return wrists as [Vec3, Vec3];
+}
+function arms(k: SculptKit, cloth: number, skin: number, y = 1.75, width = 0.51, thickness = 0.16): void {
+  const wrists = connectedSleeves(k, cloth, y, width, thickness);
+  k.group.userData.grips = {};
+  for (const wrist of wrists) {
+    const side = Math.sign(wrist[0]);
+    const direction = new THREE.Vector3(...wrist)
+      .sub(new THREE.Vector3(side * (width + 0.24), y - 0.29, -0.075))
+      .normalize();
+    k.group.userData.grips[side] = new THREE.Vector3(...wrist).addScaledVector(direction, 0.09).toArray();
+    const rotation = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, -1, 0), direction);
+    const firstHandPart = k.group.children.length;
+    hand(k, skin, wrist[0], wrist[1] - 0.09, wrist[2]);
+    for (const part of k.group.children.slice(firstHandPart)) {
+      part.position
+        .sub(new THREE.Vector3(...wrist))
+        .applyQuaternion(rotation)
+        .add(new THREE.Vector3(...wrist));
+      part.quaternion.premultiply(rotation);
+    }
+    if (k.group.name !== 'werewolfChief') {
+      const cuff = k.torus(cream, wrist, thickness * 0.72, 0.013);
+      cuff.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), direction);
     }
   }
-  bead(k, color, [x - Math.sign(x) * 0.17, y + 0.015, z - 0.09], [0.09, 0.12, 0.11]);
 }
-function boots(k: ModelKit, color: number, metal = false): void {
+function boots(k: SculptKit, c: number, spread = 0.29): void {
   for (const side of [-1, 1]) {
-    round(k, color, [side * 0.33, 0.28, -0.075], [0.27, 0.26, 0.38], metal ? 'metal' : 'leather');
-    k.box(ink, [side * 0.33, 0.095, -0.075], [0.52, 0.1, 0.65], k.group, 0.045, 'leather');
-    k.torus(metal ? silver : 0xb09b83, [side * 0.33, 0.37, -0.075], 0.205, 0.03, k.group, metal ? 'metal' : 'leather').rotation.x = Math.PI / 2;
+    k.loft(
+      c,
+      [
+        [0.04, 0, 0, 0, -0.08],
+        [0.07, 0.16, 0.24, 0, -0.08],
+        [0.18, 0.17, 0.25, 0, -0.08],
+        [0.35, 0.13, 0.14],
+        [0.62, 0.12, 0.12],
+        [0.67, 0, 0],
+      ],
+      [side * spread, 0, 0],
+      undefined,
+      'leather',
+      22,
+      20,
+    );
+    curve(
+      k,
+      cream,
+      [
+        [side * spread - 0.09, 0.22, -0.25],
+        [side * spread, 0.24, -0.28],
+        [side * spread + 0.09, 0.22, -0.25],
+      ],
+      0.012,
+    );
   }
 }
-function sleeves(k: ModelKit, cloth: number, skin: number, y = 1.72, claws = false): void {
+function tunic(k: SculptKit, c: number, wide = 0.5, top = 1.99): void {
+  k.loft(
+    c,
+    [
+      [0.45, 0, 0],
+      [0.48, wide * 0.81, 0.29],
+      [0.7, wide, 0.35],
+      [1.18, wide * 0.82, 0.31],
+      [1.7, wide * 0.97, 0.31],
+      [top, wide * 0.57, 0.22],
+      [top + 0.06, 0, 0],
+    ],
+    undefined,
+    undefined,
+    'cloth',
+    30,
+    28,
+  );
+}
+function robe(k: SculptKit, c: number, top = 2.04, bottom = 0.12, wide = 0.65): void {
+  const g = loftGeometry(
+    [
+      [bottom, 0, 0],
+      [bottom + 0.025, wide * 0.9, wide * 0.74],
+      [bottom + 0.15, wide, wide * 0.79],
+      [0.75, wide * 0.9, 0.43],
+      [1.3, 0.43, 0.34],
+      [1.75, 0.47, 0.31],
+      [top, 0.31, 0.23],
+      [top + 0.05, 0, 0],
+    ],
+    32,
+    28,
+  );
+  const p = g.getAttribute('position');
+  for (let i = 0; i < p.count; i++) {
+    const y = p.getY(i),
+      a = Math.atan2(p.getX(i), p.getZ(i));
+    const f = 1 + Math.cos(a * 8) * 0.018 * Math.max(0, 1 - y / top);
+    p.setX(i, p.getX(i) * f);
+    p.setZ(i, p.getZ(i) * f);
+  }
+  g.computeVertexNormals();
+  k.mesh(g, c);
+}
+function cape(k: SculptKit, c: number, top = 2.07, width = 0.78, bat = false): void {
+  const points: number[] = [],
+    uv: number[] = [],
+    indices: number[] = [];
+  const nx = 24,
+    ny = 20;
+  for (let j = 0; j <= ny; j++)
+    for (let i = 0; i <= nx; i++) {
+      const v = j / ny,
+        u = i / nx,
+        hem = bat ? 0.12 * Math.abs(Math.sin(u * Math.PI * 5)) : 0.035 * Math.cos(u * Math.PI * 6);
+      points.push(
+        (u - 0.5) * 2 * (0.32 + (width - 0.32) * Math.sin((v * Math.PI) / 2)),
+        top - v * (top - 0.18) - hem * v ** 8,
+        0.27 + 0.25 * Math.sin(v * Math.PI * 0.85) + 0.06 * Math.cos(u * Math.PI * 6) * v,
+      );
+      uv.push(u, v);
+      if (i < nx && j < ny) {
+        const a = j * (nx + 1) + i,
+          b = a + nx + 1;
+        indices.push(a, b, a + 1, a + 1, b, b + 1);
+      }
+    }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(points, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.setIndex(indices);
+  g.computeVertexNormals();
+  k.mesh(g, c);
+  k.material(c).side = THREE.DoubleSide;
+}
+function crown(k: SculptKit, y: number, r = 0.4, c = gold): void {
+  const n = 56,
+    verts: number[] = [],
+    indices: number[] = [];
+  for (let ring = 0; ring < 4; ring++)
+    for (let i = 0; i <= n; i++) {
+      const a = (i / n) * Math.PI * 2,
+        outer = ring % 2 === 0,
+        high = ring >= 2;
+      const rad = r + (outer ? 0.025 : -0.025);
+      const h = high ? 0.12 + 0.16 * Math.pow((Math.cos(a * 7) + 1) / 2, 3) : 0;
+      verts.push(Math.sin(a) * rad, y + h, Math.cos(a) * rad);
+    }
+  for (let j = 0; j < 3; j++)
+    for (let i = 0; i < n; i++) {
+      const a = j * (n + 1) + i,
+        b = a + n + 1;
+      indices.push(a, a + 1, b, a + 1, b + 1, b);
+    }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+  g.setIndex(indices);
+  g.computeVertexNormals();
+  k.mesh(g, c, undefined, undefined, undefined, 'metal');
+  k.material(c, 'metal').side = THREE.DoubleSide;
+  for (const a of [-0.7, 0, 0.7])
+    dot(k, 0xaa8bc9, [Math.sin(a) * r, y + 0.075, -Math.cos(a) * (r + 0.025)], [0.035, 0.045, 0.015], 'eye');
+}
+function staff(k: SculptKit, x: number, c: number, skull = false): void {
+  const firstPart = k.group.children.length;
+  curve(
+    k,
+    gold,
+    [
+      [x, 0.16, -0.12],
+      [x, 1.3, -0.12],
+      [x, 2.55, -0.12],
+    ],
+    0.035,
+    'metal',
+  );
+  if (skull) skullHead(k, 2.68, 0.42, x);
+  else {
+    const ring = k.torus(gold, [x, 2.68, -0.12], 0.18, 0.025, undefined, 'metal');
+    ring.rotation.z = 0.2;
+    dot(k, c, [x, 2.68, -0.12], [0.1, 0.15, 0.08], 'eye');
+  }
+  const grip = k.group.userData.grips[1] as Vec3;
+  for (const part of k.group.children.slice(firstPart))
+    part.position.add(new THREE.Vector3(grip[0] - x, 0, grip[2] + 0.12));
+}
+function seam(k: SculptKit, x: number, y: number, z: number, w = 0.22): void {
+  curve(
+    k,
+    0x596251,
+    [
+      [x - w / 2, y, z],
+      [x + w / 2, y + 0.025, z],
+    ],
+    0.008,
+  );
+  for (let i = 0; i < 4; i++)
+    curve(
+      k,
+      cream,
+      [
+        [x - w * 0.35 + i * w * 0.23, y - 0.025, z - 0.006],
+        [x - w * 0.35 + i * w * 0.23 + 0.015, y + 0.04, z - 0.006],
+      ],
+      0.006,
+    );
+}
+function skullHead(k: SculptKit, y = 2.52, s = 1, x = 0): void {
+  const g = new THREE.Group();
+  g.position.set(x, y, 0);
+  g.scale.setScalar(s);
+  k.group.add(g);
+  k.loft(
+    bone,
+    [
+      [-0.44, 0, 0],
+      [-0.4, 0.22, 0.2],
+      [-0.22, 0.35, 0.27],
+      [0.08, 0.5, 0.35],
+      [0.33, 0.43, 0.31],
+      [0.46, 0.25, 0.2],
+      [0.5, 0, 0],
+    ],
+    [0, 0, 0],
+    g,
+    'cloth',
+    26,
+    28,
+  );
   for (const side of [-1, 1]) {
-    round(k, cloth, [side * 0.64, y + 0.03, 0], [0.3, 0.42, 0.32]).rotation.z = side * 0.35;
-    round(k, cloth, [side * 0.79, y - 0.31, -0.07], [0.24, 0.33, 0.25]).rotation.z = side * 0.16;
-    k.torus(cream, [side * 0.83, y - 0.49, -0.075], 0.185, 0.04).rotation.x = Math.PI / 2;
-    hand(k, skin, side * 0.84, y - 0.64, -0.1, claws);
+    k.sphere(ink, [side * 0.18, 0.035, -0.326], [0.13, 0.15, 0.02], g, 20);
+    k.sphere(0xbcb1d7, [side * 0.18, 0.025, -0.349], [0.038, 0.06, 0.012], g, 12, 'eye');
   }
+  k.sphere(ink, [0, -0.16, -0.285], [0.04, 0.035, 0.013], g, 12);
+  for (const dx of [-0.1, 0, 0.1]) k.box(ink, [dx, -0.335, -0.224], [0.014, 0.09, 0.012], g, 0.004);
 }
-function robe(k: ModelKit, color: number, bottom = 0.15, top = 2.15): void {
-  const h = top - bottom;
-  k.lathe(color, [[0, 0], [0.58, 0], [0.68, 0.05], [0.7, 0.13], [0.66, h * 0.2], [0.57, h * 0.4], [0.49, h * 0.62], [0.51, h * 0.82], [0.62, h * 0.91], [0.44, h], [0, h]], [0, bottom, 0]);
-  for (let i = 0; i < 7; i++) {
-    const a = Math.PI * 2 * i / 7;
-    k.tube(new THREE.Color(color).multiplyScalar(0.85).getHex(), [[Math.sin(a) * 0.65, bottom + 0.12, Math.cos(a) * 0.65], [Math.sin(a) * 0.58, bottom + h * 0.33, Math.cos(a) * 0.58], [Math.sin(a) * 0.49, bottom + h * 0.6, Math.cos(a) * 0.49]], 0.032);
-  }
-}
-function cape(k: ModelKit, color: number, lining: number, wide = 0.92): void {
-  const s = new THREE.Shape();
-  s.moveTo(-0.46, 2.33);
-  s.bezierCurveTo(-wide, 2.0, -wide * 0.93, 0.9, -wide, 0.28);
-  s.quadraticCurveTo(-wide * 0.5, 0.08, 0, 0.2);
-  s.quadraticCurveTo(wide * 0.5, 0.08, wide, 0.28);
-  s.bezierCurveTo(wide * 0.93, 0.9, wide, 2.0, 0.46, 2.33);
-  s.closePath();
-  k.shape(color, s, 0.13, [0, 0, 0.31]);
-  const inner = k.shape(lining, s, 0.025, [0, 0.035, 0.285]);
-  inner.scale.set(0.93, 0.96, 1);
-  for (const side of [-1, 1]) k.tube(gold, [[side * 0.46, 2.32, 0.26], [side * wide * 0.85, 1.3, 0.265], [side * wide * 0.94, 0.3, 0.265]], 0.025);
-}
-function crown(k: ModelKit, y: number, color = gold): void {
-  k.cylinder(color, [0, y, 0], 0.47, 0.43, 0.14, k.group, 20, 'metal');
-  for (let i = 0; i < 7; i++) {
-    const a = i * Math.PI * 2 / 7;
-    const p: Vec3 = [Math.sin(a) * 0.44, y + 0.14, Math.cos(a) * 0.44];
-    const prong = k.shape(color, profile([[-0.105, -0.1], [-0.055, 0.12], [0, 0.24], [0.055, 0.12], [0.105, -0.1]]), 0.055, p, k.group, 'metal');
-    prong.rotation.y = a;
-    bead(k, i % 2 ? 0x87d4cd : 0xb07bc6, [p[0] * 1.06, y + 0.12, p[2] * 1.06], [0.055, 0.08, 0.04], 'eye');
-  }
-  k.torus(cream, [0, y - 0.06, 0], 0.444, 0.027, k.group, 'metal').rotation.x = Math.PI / 2;
-}
-function seam(k: ModelKit, p: Vec3, length: number): void {
-  k.tube(0x546453, [[p[0] - length / 2, p[1], p[2]], [p[0], p[1] - 0.025, p[2] - 0.015], [p[0] + length / 2, p[1] + 0.025, p[2]]], 0.017);
-  for (let i = 0; i < 5; i++) {
-    const stitch = k.box(cream, [p[0] - length * 0.4 + i * length * 0.2, p[1], p[2] - 0.025], [0.025, 0.09, 0.022], k.group, 0.006);
-    stitch.rotation.z = -0.28;
-  }
-}
-function skull(k: ModelKit, y = 2.62): void {
-  round(k, bone, [0, y, 0], [0.54, 0.52, 0.43]);
-  round(k, bone, [0, y - 0.28, -0.14], [0.36, 0.28, 0.31]);
+function collar(k: SculptKit, c: number, y = 1.98): void {
   for (const side of [-1, 1]) {
-    round(k, ink, [side * 0.21, y + 0.035, -0.37], [0.175, 0.19, 0.075]);
-    bead(k, 0xb79ee9, [side * 0.21, y + 0.02, -0.436], [0.072, 0.096, 0.024], 'eye');
-    bead(k, cream, [side * 0.21 - 0.02, y + 0.06, -0.457], [0.018, 0.025, 0.013], 'eye');
-    bead(k, bone, [side * 0.37, y - 0.16, -0.2], [0.13, 0.1, 0.2]);
-  }
-  k.shape(ink, profile([[0, 0.06], [-0.065, -0.045], [0.065, -0.045]]), 0.025, [0, y - 0.14, -0.467]);
-  for (let i = 0; i < 4; i++) k.box(ink, [-0.15 + i * 0.1, y - 0.41, -0.419], [0.02, 0.12, 0.025], k.group, 0.005);
-}
-function staff(k: ModelKit, x: number, color: number, royal = false): void {
-  k.tube(gold, [[x, 0.12, -0.08], [x, 1.35, -0.12], [x, 2.7, -0.08]], 0.055, k.group, 'metal');
-  for (const y of [0.3, 1.22, 2.56]) k.torus(cream, [x, y, -0.08], 0.068, 0.025, k.group, 'metal').rotation.x = Math.PI / 2;
-  k.torus(gold, [x, 2.88, -0.08], 0.21, 0.04, k.group, 'metal');
-  round(k, color, [x, 2.89, -0.08], [0.135, 0.17, 0.13], 'eye');
-  if (royal) {
-    for (const side of [-1, 1]) k.tube(bone, [[x + side * 0.07, 2.69, -0.08], [x + side * 0.23, 2.87, -0.08], [x + side * 0.12, 3.12, -0.08]], 0.03);
-  } else {
-    k.tube(0x91dfd8, [[x - 0.18, 2.78, -0.08], [x - 0.28, 3.04, -0.08], [x - 0.1, 3.19, -0.08], [x + 0.14, 3.12, -0.08]], 0.045);
+    const s = new THREE.Shape();
+    s.moveTo(side * 0.06, 0);
+    s.bezierCurveTo(side * 0.25, 0.04, side * 0.5, 0.35, side * 0.64, 0.58);
+    s.quadraticCurveTo(side * 0.77, 0.12, side * 0.39, -0.12);
+    s.closePath();
+    k.shape(c, s, 0.045, [0, y, 0.03]);
   }
 }
-
-const builders: Record<string, (k: ModelKit) => void> = {
+const builders: Record<string, (k: SculptKit) => void> = {
   ghostTeacher(k) {
-    robe(k, 0x646d90, 0.22, 2.15);
-    // A curling ectoplasm hem preserves the hovering teacher's ghost silhouette.
-    for (const side of [-1, 1]) k.tube(0xc7e1e6, [[side * 0.36, 0.45, 0], [side * 0.42, 0.19, -0.05], [side * 0.25, 0.08, -0.09], [side * 0.09, 0.18, -0.1]], 0.105);
-    round(k, 0xd5e5e5, [0, 2.6, 0], [0.56, 0.55, 0.44]);
-    sleeves(k, 0x646d90, 0xd5e5e5);
-    face(k, 2.65, -0.423, 0.22, true);
+    robe(k, 0x7f91b6, 2, 0.15, 0.57);
+    arms(k, 0x7f91b6, 0xd9e6df, 1.75, 0.45);
+    head(k, 0xd9e6df, 2.5, 0.5, 0.51, 0.37);
+    face(k, 2.54, 0.37);
+    // One sculpted swept forelock instead of a row of white balls.
+    k.sweep(
+      0xecf0dd,
+      [
+        [-0.44, 2.82, 0.02],
+        [-0.25, 3.02, -0.02],
+        [0.13, 3.02, -0.03],
+        [0.4, 2.88, 0],
+      ],
+      [0, 0.12, 0.11, 0],
+      [0, 0.085, 0.09, 0],
+    );
     for (const side of [-1, 1]) {
-      k.torus(0x66524c, [side * 0.225, 2.64, -0.48], 0.18, 0.027, k.group, 'metal');
-      k.tube(0x66524c, [[side * 0.4, 2.67, -0.47], [side * 0.53, 2.69, -0.23], [side * 0.5, 2.65, 0]], 0.025, k.group, 'metal');
-      k.shape(cream, profile([[0, 0], [side * 0.34, 0.14], [side * 0.25, -0.24]]), 0.04, [0, 2.05, -0.5]);
+      k.torus(gold, [side * 0.2, 2.53, -0.385], 0.16, 0.015, undefined, 'metal');
+      panel(
+        k,
+        cream,
+        [
+          [0, 0],
+          [side * 0.23, -0.06],
+          [side * 0.13, -0.23],
+        ],
+        [side * 0.04, 2.02, -0.26],
+      );
     }
-    k.tube(gold, [[-0.07, 2.67, -0.485], [0, 2.7, -0.49], [0.07, 2.67, -0.485]], 0.018, k.group, 'metal');
-    k.shape(0xab7295, profile([[0, 0.1], [-0.09, 0], [-0.055, -0.39], [0, -0.47], [0.055, -0.39], [0.09, 0]]), 0.04, [0, 1.97, -0.54]);
-    for (let i = 0; i < 4; i++) bead(k, 0xb2bdca, [0, 1.4 - i * 0.2, -0.53], [0.035, 0.035, 0.022], 'metal');
-    for (let i = 0; i < 5; i++) round(k, 0xdce0df, [-0.38 + i * 0.18, 3.03 + Math.sin(i) * 0.025, 0.045], [0.16, 0.13, 0.28]);
-    // Offset board leaves its chalk diagram readable beside, rather than behind, the face.
-    k.box(0x936646, [-0.83, 1.89, 0.41], [1.02, 1.29, 0.13], k.group, 0.07, 'leather');
-    k.box(0x285b58, [-0.83, 1.91, 0.323], [0.87, 1.12, 0.035], k.group, 0.02);
-    k.tube(cream, [[-1.17, 2.23, 0.29], [-1.02, 2.4, 0.29], [-0.87, 2.23, 0.29], [-1.17, 2.23, 0.29]], 0.018);
-    k.torus(cream, [-0.72, 2.28, 0.29], 0.09, 0.014);
-    for (let i = 0; i < 3; i++) k.box(cream, [-0.87, 1.99 - i * 0.17, 0.29], [0.51 - i * 0.07, 0.025, 0.012], k.group, 0.005);
-    k.box(0xb98559, [-0.83, 1.32, 0.25], [0.98, 0.07, 0.23], k.group, 0.02);
-    k.tube(0xbf9768, [[0.86, 1.04, -0.25], [1.0, 1.92, -0.25], [1.18, 2.77, -0.25]], 0.035, k.group, 'leather');
-    bead(k, cream, [1.18, 2.77, -0.25], [0.045, 0.065, 0.045]);
+    curve(
+      k,
+      gold,
+      [
+        [-0.04, 2.54, -0.406],
+        [0, 2.56, -0.414],
+        [0.04, 2.54, -0.406],
+      ],
+      0.012,
+      'metal',
+    );
+    panel(
+      k,
+      0xbc86a0,
+      [
+        [-0.06, 0],
+        [0.06, 0],
+        [0.045, -0.34],
+        [0, -0.39],
+        [-0.045, -0.34],
+      ],
+      [0, 1.94, -0.336],
+    );
+    for (const y of [1.33, 1.07, 0.81]) dot(k, gold, [0.04, y, -0.37], [0.025, 0.025, 0.013], 'metal');
+    k.box(0xad8157, [0.83, 1.68, 0.24], [0.77, 1.02, 0.08], undefined, 0.05, 'leather');
+    k.box(0x315954, [0.83, 1.68, 0.185], [0.66, 0.9, 0.025], undefined, 0.025);
+    curve(
+      k,
+      cream,
+      [
+        [0.59, 1.81, 0.158],
+        [0.71, 1.92, 0.158],
+        [0.85, 1.8, 0.158],
+      ],
+      0.012,
+    );
+    k.torus(cream, [1, 1.87, 0.158], 0.075, 0.01);
+    for (const y of [1.62, 1.48])
+      curve(
+        k,
+        cream,
+        [
+          [0.58, y, 0.158],
+          [1.07, y, 0.158],
+        ],
+        0.009,
+      );
+    // Short classroom chalk threaded through the actual posed hand.
+    const grip = k.group.userData.grips[-1] as Vec3;
+    curve(
+      k,
+      cream,
+      [
+        [grip[0] + 0.04, grip[1] - 0.03, grip[2] + 0.04],
+        [grip[0] - 0.08, grip[1] + 0.035, grip[2] - 0.09],
+        [grip[0] - 0.22, grip[1] + 0.1, grip[2] - 0.23],
+      ],
+      0.03,
+    );
   },
   ghostGirl(k) {
-    robe(k, 0xd8cce9, 0.2, 2.09);
-    round(k, 0x7a638e, [0, 2.59, 0.1], [0.62, 0.63, 0.48]);
-    round(k, 0xe6ecf0, [0, 2.6, -0.13], [0.5, 0.51, 0.37]);
-    sleeves(k, 0xd8cce9, 0xe6ecf0, 1.72);
-    face(k, 2.65, -0.484, 0.2);
-    for (let i = 0; i < 7; i++) {
-      const x = (i - 3) * 0.145;
-      k.tube(0x7a638e, [[x * 0.72, 3.1, -0.12], [x, 2.96, -0.43], [x + 0.035, 2.81 + Math.abs(i - 3) * 0.035, -0.48]], 0.088);
-    }
+    // Continuous curtain of hair, with the uniform and face inset in front.
+    k.loft(
+      0x493c5b,
+      [
+        [0.32, 0, 0],
+        [0.4, 0.62, 0.35],
+        [1, 0.58, 0.4],
+        [2, 0.54, 0.4],
+        [2.7, 0.58, 0.4],
+        [3.02, 0.42, 0.32],
+        [3.14, 0, 0],
+      ],
+      [0, 0, 0.27],
+      undefined,
+      'cloth',
+      36,
+      28,
+    );
+    robe(k, 0x526583, 1.99, 0.31, 0.49);
+    arms(k, 0x526583, 0xe0d8d7, 1.76, 0.4);
+    head(k, 0xe0d8d7, 2.53, 0.43, 0.45, 0.36);
+    face(k, 2.54, 0.36, 0.17, 0.9);
     for (const side of [-1, 1]) {
-      for (let i = 0; i < 3; i++) {
-        k.tube(i % 2 ? 0x88709d : 0x7a638e, [[side * (0.45 + i * 0.035), 2.85, i * 0.14], [side * (0.58 + i * 0.045), 2.32, i * 0.14], [side * (0.52 + i * 0.07), 1.72, i * 0.15], [side * (0.7 + i * 0.035), 1.53, i * 0.15]], 0.09);
-      }
-      const bow = round(k, 0xcd86b3, [side * 0.21, 3.15, -0.24], [0.24, 0.14, 0.115]);
-      bow.rotation.z = side * 0.32;
-      k.shape(0xcd86b3, profile([[0, 0], [side * 0.19, -0.02], [side * 0.3, -0.29], [side * 0.16, -0.23]]), 0.04, [side * 0.1, 3.1, -0.24]);
+      k.sweep(
+        0x493c5b,
+        [
+          [side * 0.17, 3.02, 0.14],
+          [side * 0.36, 2.98, -0.18],
+          [side * 0.44, 2.55, -0.17],
+          [side * 0.42, 1.95, -0.13],
+          [side * 0.6, 0.6, 0.03],
+        ],
+        [0.11, 0.105, 0.085, 0.02],
+        [0.12, 0.095, 0.08, 0.015],
+      );
+      panel(
+        k,
+        cream,
+        [
+          [0, 0],
+          [side * 0.28, -0.035],
+          [side * 0.16, -0.18],
+        ],
+        [side * 0.02, 2.02, -0.28],
+      );
     }
-    bead(k, 0xf2b2ce, [0, 3.15, -0.31], [0.1, 0.11, 0.09]);
-    k.torus(cream, [0, 1.9, 0], 0.49, 0.045).rotation.x = Math.PI / 2;
-    k.box(0xac90be, [0, 1.39, -0.48], [0.83, 0.11, 0.06], k.group, 0.02);
-    for (let i = 0; i < 11; i++) {
-      const a = i * Math.PI * 2 / 11;
-      bead(k, cream, [Math.sin(a) * 0.65, 0.24, Math.cos(a) * 0.65], [0.13, 0.09, 0.1]);
-    }
-    k.tube(0xc4e2ed, [[0, 0.28, 0], [-0.12, 0.1, 0], [0.11, 0.04, 0], [0.27, 0.15, 0]], 0.115);
+    k.sweep(
+      0x493c5b,
+      [
+        [-0.4, 2.87, -0.25],
+        [-0.12, 2.97, -0.34],
+        [0.23, 2.9, -0.31],
+        [0.42, 2.75, -0.23],
+      ],
+      [0, 0.13, 0.12, 0],
+      [0, 0.06, 0.07, 0],
+    );
+    panel(
+      k,
+      0xba7b93,
+      [
+        [-0.14, 0.06],
+        [0, 0],
+        [0.14, 0.06],
+        [0.1, -0.1],
+        [0, -0.04],
+        [-0.1, -0.1],
+      ],
+      [0, 1.9, -0.35],
+    );
   },
   giantZombie(k) {
-    boots(k, 0x5c4958);
-    round(k, 0x677c8d, [0, 0.78, 0], [0.64, 0.53, 0.46]);
-    round(k, 0x8aa26b, [0, 1.65, 0], [0.74, 0.72, 0.51]);
-    sleeves(k, 0x84976e, 0x9aaf7a, 1.84);
-    round(k, 0xa0b680, [0, 2.68, -0.04], [0.63, 0.55, 0.48]);
-    face(k, 2.72, -0.5, 0.24, true);
-    round(k, 0xa0b680, [0.025, 2.43, -0.16], [0.43, 0.25, 0.4]);
-    k.box(ink, [0.05, 2.38, -0.545], [0.38, 0.12, 0.04], k.group, 0.045);
-    for (const x of [-0.06, 0.07, 0.17]) k.box(cream, [x, 2.414, -0.57], [0.08, 0.09, 0.04], k.group, 0.012);
-    seam(k, [-0.15, 2.98, -0.41], 0.49);
-    seam(k, [0.18, 1.7, -0.51], 0.58);
-    k.box(0xb69a75, [-0.3, 0.79, -0.444], [0.32, 0.3, 0.04], k.group, 0.035).rotation.z = -0.18;
-    seam(k, [-0.3, 0.78, -0.473], 0.25);
-    for (const side of [-1, 1]) {
-      k.box(0x5f5269, [side * 0.32, 1.43, -0.47], [0.16, 1.17, 0.09], k.group, 0.025).rotation.z = side * 0.11;
-      bead(k, gold, [side * 0.3, 1.55, -0.54], [0.062, 0.062, 0.03], 'metal');
-    }
-    for (let i = 0; i < 5; i++) round(k, 0x4e5b4d, [-0.37 + i * 0.18, 3.17, 0.02], [0.145, 0.1 + (i % 2) * 0.055, 0.3]);
+    boots(k, 0x5f4b59, 0.45);
+    // The slow tank has a low, broad weight-bearing silhouette, not Frankenstein's coat.
+    k.loft(
+      0x7c6b89,
+      [
+        [0.4, 0, 0],
+        [0.45, 0.5, 0.35],
+        [0.7, 0.72, 0.45],
+        [1.15, 0.8, 0.49],
+        [1.65, 0.72, 0.42],
+        [1.97, 0.4, 0.29],
+        [2.04, 0, 0],
+      ],
+      undefined,
+      undefined,
+      'cloth',
+      30,
+      28,
+    );
+    arms(k, 0x7c6b89, 0xa6ba87, 1.76, 0.69, 0.2);
+    head(k, 0xa6ba87, 2.56, 0.62, 0.5, 0.43);
+    face(k, 2.62, 0.43, 0.24, 1.05);
+    k.sweep(
+      0x65735e,
+      [
+        [-0.42, 2.94, 0.05],
+        [-0.15, 3.09, 0],
+        [0.2, 3.03, -0.02],
+        [0.43, 2.99, 0.03],
+      ],
+      [0, 0.085, 0.075, 0],
+      [0, 0.05, 0.055, 0],
+    );
+    seam(k, -0.24, 2.83, -0.347, 0.25);
+    seam(k, 0.26, 2.31, -0.36, 0.22);
+    for (const side of [-1, 1])
+      panel(
+        k,
+        0x9c8b9e,
+        [
+          [0, 0.1],
+          [side * 0.25, 0],
+          [side * 0.13, -0.35],
+        ],
+        [side * 0.04, 1.99, -0.34],
+      );
+    k.box(0x526a5a, [0.2, 1.05, -0.49], [0.27, 0.33, 0.035], undefined, 0.025);
+    seam(k, 0.2, 1.07, -0.515, 0.2);
   },
   zombieKing(k) {
-    cape(k, 0x734c74, 0xad7489);
-    boots(k, 0x514254);
-    robe(k, 0x775e82, 0.35, 2.2);
-    sleeves(k, 0x775e82, 0x98ad78, 1.8);
-    round(k, 0x98ad78, [0, 2.62, 0], [0.57, 0.51, 0.44]);
-    face(k, 2.65, -0.42, 0.22, true);
-    crown(k, 3.14);
-    seam(k, [-0.16, 2.92, -0.35], 0.4);
-    k.box(ink, [0, 2.41, -0.442], [0.31, 0.09, 0.025], k.group, 0.025);
-    for (const x of [-0.1, 0.07]) k.box(cream, [x, 2.43, -0.468], [0.085, 0.09, 0.04], k.group, 0.01);
-    for (let i = 0; i < 9; i++) {
-      const a = (i / 8 - 0.5) * Math.PI;
-      bead(k, cream, [Math.sin(a) * 0.58, 2.03 - Math.cos(a) * 0.16, -Math.cos(a) * 0.44], [0.15, 0.13, 0.14]);
-    }
-    k.tube(gold, [[-0.37, 1.79, -0.46], [0, 1.54, -0.57], [0.37, 1.79, -0.46]], 0.032, k.group, 'metal');
-    bead(k, 0xb79ae3, [0, 1.53, -0.59], [0.095, 0.12, 0.055], 'eye');
-    for (let i = 0; i < 4; i++) k.box(gold, [0, 1.2 - i * 0.18, -0.6], [0.13, 0.045, 0.025], k.group, 0.01, 'metal');
+    boots(k, 0x635267, 0.32);
+    tunic(k, 0x746382, 0.56, 2.02);
+    cape(k, 0x885c75, 2.02, 0.78);
+    arms(k, 0x746382, 0xa7bb88, 1.8, 0.53);
+    head(k, 0xa7bb88, 2.53, 0.54, 0.49, 0.4);
+    face(k, 2.56, 0.4, 0.21, 1, true);
+    crown(k, 2.93, 0.37);
+    collar(k, 0xc2ad91, 1.95);
+    seam(k, -0.25, 2.75, -0.34);
+    curve(
+      k,
+      gold,
+      [
+        [-0.35, 1.88, -0.29],
+        [0, 1.59, -0.4],
+        [0.35, 1.88, -0.29],
+      ],
+      0.022,
+      'metal',
+    );
+    dot(k, 0xa088c7, [0, 1.59, -0.42], [0.08, 0.1, 0.03], 'eye');
+    for (const y of [0.85, 1.1, 1.35]) dot(k, gold, [0, y, -0.35], [0.03, 0.03, 0.015], 'metal');
   },
   lightningGolem(k) {
-    boots(k, 0x566a80, true);
-    for (const side of [-1, 1]) k.cylinder(0x627d91, [side * 0.33, 0.61, -0.02], 0.14, 0.12, 0.45, k.group, 12, 'metal');
-    k.box(0x627d91, [0, 1.45, 0], [1.2, 1.42, 0.81], k.group, 0.19, 'metal');
-    round(k, 0x7895a4, [0, 2.54, 0], [0.56, 0.51, 0.43], 'metal');
-    k.box(ink, [0, 2.57, -0.4], [0.86, 0.28, 0.12], k.group, 0.08, 'metal');
+    boots(k, 0x587b8f, 0.33);
+    k.loft(
+      0x5c879c,
+      [
+        [0.45, 0, 0],
+        [0.51, 0.4, 0.31],
+        [1, 0.54, 0.38],
+        [1.62, 0.58, 0.37],
+        [1.95, 0.4, 0.29],
+        [2.02, 0, 0],
+      ],
+      undefined,
+      undefined,
+      'metal',
+      30,
+      28,
+    );
+    arms(k, 0x5c879c, 0xa8c8cc, 1.8, 0.55);
+    k.loft(
+      0x88b8c2,
+      [
+        [2.01, 0, 0],
+        [2.08, 0.35, 0.29],
+        [2.37, 0.46, 0.36],
+        [2.71, 0.42, 0.33],
+        [2.85, 0.27, 0.25],
+        [2.89, 0, 0],
+      ],
+      undefined,
+      undefined,
+      'metal',
+    );
+    k.box(ink, [0, 2.45, -0.348], [0.67, 0.25, 0.045], undefined, 0.06);
+    for (const side of [-1, 1]) dot(k, 0xa9f1df, [side * 0.16, 2.46, -0.38], [0.065, 0.08, 0.013], 'glow');
     for (const side of [-1, 1]) {
-      round(k, 0x9bdedb, [side * 0.21, 2.59, -0.48], [0.105, 0.08, 0.045], 'eye');
-      round(k, 0x526b83, [side * 0.79, 1.86, 0], [0.28, 0.34, 0.31], 'metal');
-      round(k, 0x7e939d, [side * 0.9, 1.38, 0], [0.25, 0.32, 0.26], 'metal');
-      hand(k, 0x8da5ae, side * 0.94, 0.98, -0.09);
-      k.cylinder(0x415268, [side * 0.83, 2.66, 0.09], 0.11, 0.14, 0.86, k.group, 16, 'metal');
-      // Real continuous helical winding, not a stack of disconnected glowing balls.
-      const winding: Vec3[] = [];
-      for (let i = 0; i <= 56; i++) {
-        const a = i * Math.PI * 2 / 8;
-        winding.push([side * 0.83 + Math.cos(a) * 0.19, 2.28 + i * 0.012, 0.09 + Math.sin(a) * 0.19]);
+      curve(
+        k,
+        gold,
+        [
+          [side * 0.3, 2.73, 0],
+          [side * 0.38, 3.04, 0],
+          [side * 0.26, 3.15, 0],
+        ],
+        0.034,
+        'metal',
+      );
+      for (let i = 0; i < 4; i++) {
+        const t = k.torus(silver, [side * 0.35, 2.9 + i * 0.045, 0], 0.075, 0.012, undefined, 'metal');
+        t.rotation.x = Math.PI / 2;
       }
-      k.tube(0xc99860, winding, 0.035, k.group, 'metal');
-      round(k, silver, [side * 0.83, 3.06, 0.09], [0.24, 0.14, 0.24], 'metal');
-      k.tube(0x8bece5, [[side * 0.62, 3.05, 0.09], [side * 0.4, 3.22, 0.07], [side * 0.33, 3.05, 0.04], [side * 0.12, 3.25, 0]], 0.025, k.group, 'glow');
-      for (const y of [1.0, 1.91]) bead(k, gold, [side * 0.45, y, -0.43], [0.06, 0.06, 0.035], 'metal');
     }
-    k.torus(gold, [0, 1.48, -0.46], 0.31, 0.065, k.group, 'metal');
-    round(k, 0x7ad5d7, [0, 1.48, -0.47], [0.23, 0.23, 0.095], 'eye');
-    k.tube(cream, [[0.04, 1.65, -0.565], [-0.07, 1.47, -0.58], [0.05, 1.47, -0.58], [-0.035, 1.31, -0.565]], 0.028, k.group, 'glow');
-    for (let i = 0; i < 4; i++) k.box(ink, [-0.15 + i * 0.1, 2.31, -0.414], [0.05, 0.07, 0.025], k.group, 0.008);
+    k.torus(gold, [0, 1.43, -0.386], 0.21, 0.028, undefined, 'metal');
+    panel(
+      k,
+      0x9ce6dc,
+      [
+        [-0.04, 0.18],
+        [0.09, 0.18],
+        [0.01, 0.02],
+        [0.1, 0.02],
+        [-0.08, -0.18],
+        [-0.02, -0.02],
+        [-0.1, -0.02],
+      ],
+      [0, 1.43, -0.425],
+      0.025,
+      'glow',
+    );
   },
   frankenstein(k) {
-    boots(k, 0x464457);
-    round(k, 0x655779, [0, 0.74, 0], [0.55, 0.49, 0.38]);
-    k.box(0x68647e, [0, 1.57, 0], [1.05, 1.2, 0.78], k.group, 0.18);
-    sleeves(k, 0x68647e, 0x95bc97, 1.82);
-    k.box(0x95bc97, [0, 2.64, 0], [1.03, 0.94, 0.8], k.group, 0.19);
-    round(k, 0x95bc97, [0, 2.4, -0.12], [0.47, 0.3, 0.35]);
-    face(k, 2.67, -0.405, 0.22);
-    k.box(0x3e4256, [0, 3.07, 0.04], [1.06, 0.17, 0.79], k.group, 0.065);
-    for (let i = 0; i < 6; i++) k.box(0x3e4256, [-0.42 + i * 0.165, 2.98 - (i % 2) * 0.03, -0.35], [0.12, 0.18, 0.095], k.group, 0.02);
+    boots(k, 0x4e4a60, 0.31);
+    tunic(k, 0x655d79, 0.54, 1.97);
+    arms(k, 0x655d79, 0xabc39a, 1.78, 0.52);
+    k.loft(
+      0xabc39a,
+      [
+        [2.02, 0, 0],
+        [2.09, 0.3, 0.25],
+        [2.3, 0.47, 0.35],
+        [2.73, 0.48, 0.35],
+        [2.94, 0.4, 0.3],
+        [2.97, 0, 0],
+      ],
+      undefined,
+      undefined,
+      'cloth',
+      30,
+      28,
+    );
+    face(k, 2.53, 0.35, 0.2, 0.95);
+    k.loft(
+      0x3f3d53,
+      [
+        [2.84, 0.43, 0.32],
+        [2.96, 0.43, 0.32],
+        [3.01, 0.34, 0.25],
+        [3.02, 0, 0],
+      ],
+      undefined,
+      undefined,
+      'cloth',
+      12,
+      28,
+    );
     for (const side of [-1, 1]) {
-      const bolt = k.cylinder(silver, [side * 0.59, 2.4, 0.01], 0.11, 0.11, 0.25, k.group, 6, 'metal');
-      bolt.rotation.z = Math.PI / 2;
-      const cap = k.cylinder(0x607887, [side * 0.73, 2.4, 0.01], 0.16, 0.16, 0.09, k.group, 6, 'metal');
-      cap.rotation.z = Math.PI / 2;
-      k.shape(0x454153, profile([[0, 0], [side * 0.39, 0.08], [side * 0.27, -0.48], [side * 0.07, -0.65]]), 0.05, [0, 2.1, -0.43]);
+      k.cylinder(silver, [side * 0.45, 2.15, 0], 0.095, 0.095, 0.19, undefined, 16, 'metal').rotation.z = Math.PI / 2;
+      panel(
+        k,
+        0x918292,
+        [
+          [0, 0.08],
+          [side * 0.24, 0],
+          [side * 0.12, -0.3],
+        ],
+        [side * 0.035, 1.96, -0.31],
+      );
     }
-    seam(k, [0.05, 2.86, -0.427], 0.56);
-    seam(k, [-0.2, 1.48, -0.43], 0.32);
-    k.box(0xc6b48d, [0.22, 1.47, -0.421], [0.24, 0.23, 0.035], k.group, 0.02);
-    k.torus(gold, [0.22, 1.49, -0.45], 0.075, 0.018, k.group, 'metal');
-    for (let i = 0; i < 3; i++) bead(k, silver, [0, 1.32 - i * 0.2, -0.421], [0.037, 0.038, 0.025], 'metal');
+    seam(k, 0.12, 2.77, -0.339, 0.4);
+    seam(k, -0.2, 2.27, -0.304, 0.2);
+    for (const y of [1.6, 1.32, 1.04]) dot(k, gold, [0.02, y, -0.35], [0.026, 0.026, 0.014], 'metal');
+    curve(
+      k,
+      0xb6d8a8,
+      [
+        [-0.31, 1.67, -0.3],
+        [-0.25, 1.28, -0.37],
+        [0.22, 1.06, -0.36],
+      ],
+      0.022,
+    );
   },
   kraken(k) {
-    round(k, 0x9a72bc, [0, 2.13, 0.08], [0.75, 0.98, 0.66]);
-    round(k, 0xba90ce, [0, 1.65, -0.09], [0.68, 0.47, 0.59]);
-    face(k, 2.14, -0.556, 0.27);
-    k.torus(0xdfb3dc, [0, 1.8, -0.674], 0.105, 0.044);
+    // One smooth mantle, eight individual continuous tentacles flowing from its base.
+    k.loft(
+      0x9e79b8,
+      [
+        [0.57, 0, 0],
+        [0.62, 0.52, 0.44],
+        [0.78, 0.62, 0.52],
+        [1.06, 0.58, 0.48],
+        [1.55, 0.68, 0.56],
+        [2.2, 0.66, 0.55],
+        [2.72, 0.45, 0.38],
+        [2.94, 0.15, 0.13],
+        [2.97, 0, 0],
+      ],
+      undefined,
+      undefined,
+      'cloth',
+      38,
+      32,
+    );
+    face(k, 1.91, 0.55, 0.27, 1.3);
+    k.torus(0xd0a0bf, [0, 1.54, -0.548], 0.095, 0.025);
     for (let i = 0; i < 8; i++) {
-      const a = Math.PI * 2 * i / 8;
-      const dx = Math.sin(a), dz = Math.cos(a);
-      const points: Vec3[] = [[dx * 0.46, 1.48, dz * 0.43], [dx * 0.8, 0.92, dz * 0.68], [dx * 1.04, 0.28, dz * 0.86], [dx * 1.24, 0.27, dz * 1.04], [dx * 1.3, 0.57, dz * 1.09], [dx * 1.14, 0.71, dz * 0.98]];
-      k.tube(i % 2 ? 0x9a72bc : 0xaa80c6, points, 0.145);
-      // Underside cups follow the curl, with inset dark wells (visible from side/front).
-      for (let j = 0; j < 6; j++) {
-        const t = j / 5;
-        const r = 0.61 + t * 0.6;
-        const y = j < 4 ? 1.17 - j * 0.27 : 0.32 + (j - 4) * 0.2;
-        const cup = k.mesh(new THREE.TorusGeometry(0.061 - t * 0.015, 0.022, 5, 12), 0xefbbd8, [dx * r, y, dz * r - 0.115]);
-        cup.rotation.y = a * 0.25;
-        bead(k, 0x775087, [dx * r, y, dz * r - 0.121], [0.033, 0.036, 0.015]);
-      }
+      const a = (i / 8) * Math.PI * 2,
+        x = Math.sin(a),
+        z = Math.cos(a);
+      k.sweep(
+        0x9e79b8,
+        [
+          [x * 0.12, 1.3, z * 0.1],
+          [x * 0.44, 0.76, z * 0.37],
+          [x * 0.7, 0.43, z * 0.59],
+          [x * 1.12, 0.2, z * 0.85],
+          [x * 1.31, 0.37, z * 0.88],
+          [x * 1.24, 0.57, z * 0.79],
+        ],
+        [0.22, 0.2, 0.15, 0.08, 0.01],
+        undefined,
+        undefined,
+        'cloth',
+        30,
+      );
+      for (let j = 0; j < 3; j++)
+        dot(
+          k,
+          0xd4b1d5,
+          [x * (0.68 + j * 0.16), 0.28 + j * 0.015, z * (0.56 + j * 0.1)],
+          [0.075 - j * 0.012, 0.026, 0.07 - j * 0.01],
+        );
     }
-    for (let i = 0; i < 7; i++) {
-      const a = Math.PI * 2 * i / 7;
-      bead(k, 0xd6a4d7, [Math.sin(a) * 0.57, 2.68 + (i % 2) * 0.12, Math.cos(a) * 0.48], [0.11, 0.065, 0.06]);
-    }
-    for (const side of [-1, 1]) round(k, 0xaa80c6, [side * 0.69, 2.27, 0.1], [0.21, 0.37, 0.12]).rotation.z = side * 0.32;
+    for (const side of [-1, 1]) dot(k, 0xc3a2d3, [side * 0.4, 2.51, -0.31], [0.06, 0.04, 0.018]);
   },
   seaWitch(k) {
-    robe(k, 0x476c8f, 0.12, 2.15);
-    round(k, 0x7282aa, [0, 2.62, 0.09], [0.6, 0.57, 0.47]);
-    round(k, 0xa2d2cd, [0, 2.61, -0.12], [0.49, 0.49, 0.37]);
-    sleeves(k, 0x527c99, 0xa2d2cd, 1.75);
-    face(k, 2.65, -0.474, 0.2);
+    robe(k, 0x548c9c, 2.02, 0.12, 0.7);
+    arms(k, 0x548c9c, 0xb5d6ce, 1.78, 0.45);
+    head(k, 0xb5d6ce, 2.5, 0.47, 0.49, 0.37);
+    face(k, 2.54, 0.37, 0.18, 0.95);
+    // Swept seaweed hair is one flowing profile on each side, not pearl-sized lumps.
+    for (const side of [-1, 1])
+      k.sweep(
+        0x627ba1,
+        [
+          [side * 0.17, 2.95, 0.02],
+          [side * 0.47, 2.68, 0.06],
+          [side * 0.48, 2.2, 0.08],
+          [side * 0.62, 1.81, 0.1],
+        ],
+        [0.16, 0.15, 0.11, 0],
+        [0.12, 0.13, 0.09, 0],
+      );
+    crown(k, 2.91, 0.34, 0xddab94);
     for (const side of [-1, 1]) {
-      for (let i = 0; i < 4; i++) {
-        k.tube(i % 2 ? 0x758fb4 : 0x597f9f, [[side * (0.34 + i * 0.055), 3.0, i * 0.12], [side * (0.55 + i * 0.04), 2.58, i * 0.1], [side * (0.62 + i * 0.06), 1.95, i * 0.14], [side * (0.81 + i * 0.035), 2.04, i * 0.14]], 0.092);
-      }
-      k.tube(0x597f9f, [[side * 0.12, 3.04, -0.2], [side * 0.27, 2.91, -0.43], [side * 0.45, 2.72, -0.36]], 0.105);
-      bead(k, cream, [side * 0.47, 2.4, -0.23], [0.055, 0.07, 0.055], 'eye');
+      k.sweep(
+        0xddab94,
+        [
+          [side * 0.2, 2.94, 0],
+          [side * 0.28, 3.22, 0],
+          [side * 0.24, 3.39, 0],
+        ],
+        [0.035, 0.028, 0],
+        undefined,
+        undefined,
+        'cloth',
+        18,
+      );
+      k.sweep(
+        0xddab94,
+        [
+          [side * 0.26, 3.11, 0],
+          [side * 0.4, 3.22, 0],
+          [side * 0.43, 3.29, 0],
+        ],
+        [0.025, 0.02, 0],
+        undefined,
+        undefined,
+        'cloth',
+        12,
+      );
+      dot(k, cream, [side * 0.28, 3.2, -0.025], [0.055, 0.055, 0.04], 'eye');
     }
-    crown(k, 3.1, 0x8fd9d3);
-    staff(k, 1.05, 0x9c83cb);
-    for (let i = 0; i < 9; i++) {
-      const a = (i / 8 - 0.5) * Math.PI;
-      bead(k, cream, [Math.sin(a) * 0.42, 2.01 - Math.cos(a) * 0.2, -Math.cos(a) * 0.45], [0.049, 0.05, 0.049], 'eye');
-    }
-    // Shell brooch is a scalloped fan with relief ribs.
-    const shell = new THREE.Shape();
-    shell.moveTo(0, 0);
-    shell.bezierCurveTo(-0.33, 0.12, -0.32, 0.32, -0.2, 0.34);
-    shell.quadraticCurveTo(0, 0.45, 0.2, 0.34);
-    shell.bezierCurveTo(0.32, 0.32, 0.33, 0.12, 0, 0);
-    k.shape(0xc2a3cc, shell, 0.045, [0, 1.37, -0.55]);
-    for (let i = -2; i <= 2; i++) k.tube(cream, [[0, 1.4, -0.57], [i * 0.06, 1.55, -0.585], [i * 0.085, 1.7, -0.57]], 0.012);
+    curve(
+      k,
+      cream,
+      [
+        [-0.3, 1.98, -0.25],
+        [0, 1.78, -0.37],
+        [0.3, 1.98, -0.25],
+      ],
+      0.025,
+    );
+    dot(k, 0xaaa4d5, [0, 1.78, -0.4], [0.075, 0.1, 0.025], 'eye');
+    staff(k, 0.98, 0x8ce4db);
+    for (const side of [-1, 1])
+      curve(
+        k,
+        0x98c1c3,
+        [
+          [side * 0.2, 1.37, -0.32],
+          [side * 0.35, 0.8, -0.41],
+          [side * 0.5, 0.25, -0.4],
+        ],
+        0.012,
+      );
   },
   werewolfChief(k) {
-    boots(k, 0x76677e);
-    for (const side of [-1, 1]) bead(k, 0x75677c, [side * 0.3, 0.57, -0.02], [0.2, 0.3, 0.23]);
-    round(k, 0x75677c, [0, 1.39, 0], [0.64, 0.81, 0.47]);
-    round(k, 0xb5a291, [0, 1.63, -0.31], [0.43, 0.52, 0.24]);
-    sleeves(k, 0x75677c, 0x88758c, 1.86, true);
-    round(k, 0x88758c, [0, 2.62, 0], [0.58, 0.53, 0.45]);
     for (const side of [-1, 1]) {
-      const ear = new THREE.Shape();
-      ear.moveTo(-0.2, 0);
-      ear.quadraticCurveTo(-0.2, 0.24, 0, 0.48);
-      ear.quadraticCurveTo(0.2, 0.24, 0.2, 0);
-      ear.closePath();
-      k.shape(0x88758c, ear, 0.15, [side * 0.38, 2.92, -0.05]);
-      bead(k, 0xc18f9f, [side * 0.38, 3.1, -0.068], [0.09, 0.17, 0.027]);
-      for (let i = 0; i < 4; i++) {
-        const tuft = round(k, i % 2 ? 0xb5a291 : 0x9d8c91, [side * (0.41 + i * 0.07), 2.3 - i * 0.15, 0.02], [0.22, 0.26, 0.25]);
-        tuft.rotation.z = side * (0.35 + i * 0.13);
-      }
+      k.loft(
+        0x827383,
+        [
+          [0.04, 0, 0, 0, -0.08],
+          [0.08, 0.14, 0.23, 0, -0.08],
+          [0.21, 0.14, 0.23, 0, -0.06],
+          [0.37, 0.09, 0.1, 0, 0.05],
+          [0.61, 0.14, 0.13],
+          [0.7, 0, 0],
+        ],
+        [side * 0.27, 0, 0],
+        undefined,
+        'cloth',
+        22,
+        20,
+      );
+      for (const dx of [-0.06, 0, 0.06])
+        k.sweep(
+          cream,
+          [
+            [side * 0.27 + dx, 0.11, -0.23],
+            [side * 0.27 + dx, 0.08, -0.3],
+          ],
+          [0.025, 0],
+          undefined,
+          undefined,
+          'cloth',
+          10,
+        );
     }
-    face(k, 2.72, -0.424, 0.235);
-    round(k, 0xb8a79a, [0, 2.46, -0.36], [0.37, 0.22, 0.33]);
-    round(k, ink, [0, 2.56, -0.65], [0.15, 0.1, 0.065], 'eye');
-    k.tube(ink, [[-0.23, 2.38, -0.55], [0, 2.32, -0.65], [0.23, 2.38, -0.55]], 0.023);
-    for (const side of [-1, 1]) k.cylinder(cream, [side * 0.19, 2.3, -0.58], 0.047, 0.01, 0.15, k.group, 8);
-    k.tube(0x9c5e71, [[-0.42, 2.1, -0.32], [0, 1.93, -0.55], [0.42, 2.1, -0.32]], 0.08);
-    bead(k, gold, [0, 1.95, -0.63], [0.11, 0.12, 0.055], 'metal');
-    k.tube(0x75677c, [[0, 0.74, 0.35], [0.34, 0.62, 0.67], [0.6, 0.92, 0.75], [0.52, 1.13, 0.72]], 0.15);
+    k.loft(
+      0x827383,
+      [
+        [0.48, 0, 0],
+        [0.52, 0.29, 0.25],
+        [0.93, 0.36, 0.29],
+        [1.4, 0.44, 0.32],
+        [1.78, 0.53, 0.32],
+        [2.02, 0.29, 0.23],
+        [2.08, 0, 0],
+      ],
+      undefined,
+      undefined,
+      'cloth',
+      30,
+      28,
+    );
+    const ruff = new THREE.Shape();
+    ruff.moveTo(-0.26, 0.28);
+    ruff.bezierCurveTo(-0.4, 0.12, -0.29, -0.06, -0.14, -0.15);
+    ruff.lineTo(0, -0.34);
+    ruff.lineTo(0.14, -0.15);
+    ruff.bezierCurveTo(0.29, -0.06, 0.4, 0.12, 0.26, 0.28);
+    ruff.quadraticCurveTo(0, 0.12, -0.26, 0.28);
+    k.shape(0xcbbab1, ruff, 0.025, [0, 1.55, -0.327]);
+    arms(k, 0x827383, 0xa99b9b, 1.8, 0.52);
+    // Forehead and muzzle are one stretched/offset ring surface, avoiding a glued-on snout.
+    const muzzle = k.loft(
+      0x958696,
+      [
+        [2.02, 0, 0],
+        [2.09, 0.25, 0.23, 0, -0.14],
+        [2.25, 0.34, 0.31, 0, -0.25],
+        [2.43, 0.42, 0.38, 0, -0.15],
+        [2.64, 0.48, 0.37, 0, -0.03],
+        [2.83, 0.4, 0.3],
+        [3, 0.2, 0.16],
+        [3.03, 0, 0],
+      ],
+      undefined,
+      undefined,
+      'cloth',
+      32,
+      28,
+    );
+    const positions = muzzle.geometry.getAttribute('position');
+    const shades: number[] = [];
+    for (let i = 0; i < positions.count; i++) {
+      const z = positions.getZ(i),
+        y = positions.getY(i);
+      const blend = THREE.MathUtils.smoothstep(-z, 0.31, 0.49) * (1 - THREE.MathUtils.smoothstep(y, 2.39, 2.55));
+      const color = new THREE.Color(0x958696).lerp(new THREE.Color(0xd7c7b6), blend);
+      shades.push(color.r, color.g, color.b);
+    }
+    muzzle.geometry.setAttribute('color', new THREE.Float32BufferAttribute(shades, 3));
+    const furMaterial = k.material(0x958696).clone();
+    furMaterial.color.setHex(0xffffff);
+    furMaterial.vertexColors = true;
+    muzzle.material = furMaterial;
+    face(k, 2.62, 0.42, 0.22, 1, true);
+    dot(k, ink, [0, 2.33, -0.59], [0.11, 0.075, 0.03], 'eye');
+    for (const side of [-1, 1]) {
+      k.sweep(
+        0x827383,
+        [
+          [side * 0.27, 2.8, 0.02],
+          [side * 0.36, 3.01, 0.025],
+          [side * 0.43, 3.17, 0.035],
+        ],
+        [0.19, 0.13, 0],
+        [0.095, 0.06, 0],
+      );
+      k.sweep(
+        0xcfb6b4,
+        [
+          [side * 0.29, 2.89, -0.066],
+          [side * 0.36, 3.02, -0.04],
+          [side * 0.42, 3.1, -0.015],
+        ],
+        [0.065, 0.045, 0],
+        [0.015, 0.014, 0],
+      );
+      for (const dx of [-0.055, 0, 0.055])
+        k.sweep(
+          cream,
+          [
+            [side * 0.76 + dx, 1.04, -0.14],
+            [side * 0.76 + dx, 0.94, -0.2],
+          ],
+          [0.022, 0],
+          undefined,
+          undefined,
+          'cloth',
+          10,
+        );
+    }
+    k.sweep(
+      0x827383,
+      [
+        [0, 0.69, 0.24],
+        [0.24, 0.6, 0.55],
+        [0.37, 0.76, 0.73],
+        [0.31, 0.97, 0.67],
+      ],
+      [0.16, 0.13, 0.08, 0],
+    );
+    curve(
+      k,
+      cream,
+      [
+        [-0.08, 2.2, -0.525],
+        [0, 2.17, -0.52],
+        [0.08, 2.2, -0.525],
+      ],
+      0.015,
+    );
   },
   dracula(k) {
-    cape(k, 0x44334f, 0x995c76, 1.02);
-    boots(k, 0x3e354e);
-    round(k, 0x493b58, [0, 0.79, 0], [0.48, 0.5, 0.36]);
-    round(k, 0xeee0ce, [0, 1.65, -0.01], [0.51, 0.55, 0.38]);
-    sleeves(k, 0x493b58, 0xddcedf, 1.8);
-    round(k, 0x4a3b58, [0, 2.64, 0.08], [0.59, 0.59, 0.45]);
-    round(k, 0xddcedf, [0, 2.6, -0.11], [0.51, 0.49, 0.36]);
-    face(k, 2.66, -0.455, 0.21);
-    // Widow's peak and swept locks, not a sphere painted black.
-    k.shape(0x4a3b58, profile([[-0.46, 0.1], [-0.37, 0.26], [0.37, 0.26], [0.46, 0.1], [0.17, 0.09], [0, -0.1], [-0.17, 0.09]]), 0.11, [0, 2.91, -0.43]);
+    boots(k, 0x443d54, 0.27);
+    tunic(k, 0x514661, 0.43, 2);
+    cape(k, 0x8e526d, 2.12, 0.8, true);
+    arms(k, 0x514661, 0xe1d7db, 1.76, 0.43);
+    head(k, 0xe1d7db, 2.5, 0.47, 0.48, 0.36);
+    face(k, 2.5, 0.36, 0.18, 0.94);
+    collar(k, 0x9f637e, 1.98);
+    k.loft(
+      0x40374f,
+      [
+        [2.78, 0.43, 0.31],
+        [2.98, 0.32, 0.24],
+        [3.04, 0, 0],
+      ],
+      undefined,
+      undefined,
+      'cloth',
+      16,
+      28,
+    );
+    panel(
+      k,
+      0x40374f,
+      [
+        [-0.37, 0.12],
+        [-0.12, 0.18],
+        [0, 0.01],
+        [0.12, 0.18],
+        [0.37, 0.12],
+        [0.26, 0.22],
+        [-0.26, 0.22],
+      ],
+      [0, 2.73, -0.3],
+      0.06,
+    );
     for (const side of [-1, 1]) {
-      k.tube(0x4a3b58, [[side * 0.4, 3.01, -0.28], [side * 0.51, 2.75, -0.26], [side * 0.46, 2.5, -0.24]], 0.085);
-      const collar = new THREE.Shape();
-      collar.moveTo(side * 0.12, 1.99);
-      collar.lineTo(side * 0.72, 2.68);
-      collar.quadraticCurveTo(side * 0.92, 2.05, side * 0.5, 1.84);
-      collar.closePath();
-      k.shape(0x995c76, collar, 0.08, [0, 0, 0.02]);
-      k.tube(gold, [[side * 0.14, 2.03, -0.005], [side * 0.44, 2.36, -0.005], [side * 0.71, 2.65, -0.005]], 0.021, k.group, 'metal');
-      k.shape(0x864f6d, profile([[0, 0], [side * 0.44, 0.2], [side * 0.4, -0.5], [side * 0.12, -0.62], [0, -0.46]]), 0.06, [0, 1.89, -0.41]);
-      k.shape(cream, profile([[0, 0], [side * 0.22, 0.13], [side * 0.21, -0.13]]), 0.04, [0, 2.06, -0.445]);
-      bead(k, 0x71445d, [side * 0.12, 1.99, -0.49], [0.12, 0.07, 0.06]);
-      k.cylinder(cream, [side * 0.075, 2.38, -0.447], 0.036, 0.008, 0.13, k.group, 8);
+      panel(
+        k,
+        cream,
+        [
+          [0, 0.08],
+          [side * 0.22, 0.02],
+          [side * 0.1, -0.15],
+        ],
+        [side * 0.03, 2.01, -0.27],
+      );
+      k.sweep(
+        cream,
+        [
+          [side * 0.055, 2.31, -0.363],
+          [side * 0.055, 2.24, -0.36],
+        ],
+        [0.022, 0],
+        undefined,
+        undefined,
+        'cloth',
+        10,
+      );
     }
-    bead(k, gold, [0, 1.99, -0.54], [0.04, 0.055, 0.035], 'metal');
-    for (let i = 0; i < 4; i++) bead(k, gold, [0.055, 1.79 - i * 0.14, -0.49], [0.028, 0.032, 0.02], 'metal');
-    k.tube(gold, [[0.12, 1.54, -0.495], [0.27, 1.35, -0.5], [0.4, 1.58, -0.47]], 0.017, k.group, 'metal');
+    panel(
+      k,
+      0xac6b85,
+      [
+        [-0.15, 0.08],
+        [0, 0],
+        [0.15, 0.08],
+        [0.11, -0.08],
+        [0, -0.03],
+        [-0.11, -0.08],
+      ],
+      [0, 1.87, -0.34],
+    );
+    dot(k, gold, [0, 1.87, -0.39], [0.03, 0.04, 0.015], 'metal');
+    for (const y of [1.55, 1.33, 1.11]) dot(k, gold, [0.025, y, -0.34], [0.023, 0.026, 0.015], 'metal');
   },
   skeletonKnight(k) {
-    cape(k, 0x65738a, 0x8796aa, 0.82);
-    boots(k, 0x6c8294, true);
-    for (const side of [-1, 1]) k.cylinder(0x64788d, [side * 0.33, 0.6, 0], 0.13, 0.11, 0.45, k.group, 12, 'metal');
-    round(k, 0x64788d, [0, 1.15, 0], [0.51, 0.65, 0.39], 'metal');
-    round(k, 0x98adba, [0, 1.78, -0.05], [0.59, 0.48, 0.43], 'metal');
-    skull(k, 2.62);
-    for (const side of [-1, 1]) {
-      round(k, 0x71899c, [side * 0.69, 1.97, 0], [0.35, 0.26, 0.36], 'metal');
-      k.tube(bone, [[side * 0.67, 1.85, 0], [side * 0.83, 1.51, -0.01], [side * 0.81, 1.14, -0.1]], 0.09);
-      round(k, 0x98adba, [side * 0.81, 1.36, -0.05], [0.2, 0.24, 0.2], 'metal');
-      hand(k, bone, side * 0.82, 1.07, -0.12);
-      for (let i = 0; i < 3; i++) k.tube(silver, [[side * 0.1, 1.81 - i * 0.15, -0.473], [side * 0.32, 1.83 - i * 0.15, -0.43], [side * 0.48, 1.89 - i * 0.15, -0.32]], 0.035, k.group, 'metal');
-    }
-    round(k, 0x728a9c, [0, 2.98, 0.09], [0.56, 0.27, 0.44], 'metal');
-    k.box(silver, [0, 2.91, -0.381], [1.03, 0.095, 0.12], k.group, 0.035, 'metal');
-    k.shape(0x9b739f, profile([[-0.08, 0], [-0.11, 0.26], [0, 0.4], [0.11, 0.26], [0.08, 0]]), 0.31, [0, 3.09, -0.05]);
+    boots(k, 0x71899d, 0.28);
+    tunic(k, 0x71899d, 0.47, 1.99);
+    cape(k, 0x67758f, 1.96, 0.67);
+    arms(k, 0x71899d, bone, 1.76, 0.46);
+    skullHead(k, 2.5, 1.02);
+    // Single fitted cuirass: raised ribs are shallow chased metal, not bulbous armor spheres.
+    for (const y of [1.65, 1.43, 1.21])
+      curve(
+        k,
+        silver,
+        [
+          [-0.35, y + 0.04, -0.26],
+          [0, y - 0.03, -0.37],
+          [0.35, y + 0.04, -0.26],
+        ],
+        0.023,
+        'metal',
+      );
+    k.loft(
+      0x71899d,
+      [
+        [2.84, 0.43, 0.3],
+        [2.94, 0.41, 0.3],
+        [3.06, 0.24, 0.2],
+        [3.11, 0, 0],
+      ],
+      undefined,
+      undefined,
+      'metal',
+      16,
+      28,
+    );
+    panel(
+      k,
+      0xa281a7,
+      [
+        [-0.06, 0],
+        [-0.07, 0.24],
+        [0, 0.36],
+        [0.07, 0.24],
+        [0.06, 0],
+      ],
+      [0, 3.01, 0],
+      0.19,
+    );
+    const firstShieldPart = k.group.children.length;
     const shield = new THREE.Shape();
-    shield.moveTo(-0.4, 0.46);
-    shield.quadraticCurveTo(0, 0.65, 0.4, 0.46);
-    shield.lineTo(0.38, -0.15);
-    shield.quadraticCurveTo(0.3, -0.45, 0, -0.59);
-    shield.quadraticCurveTo(-0.3, -0.45, -0.38, -0.15);
+    shield.moveTo(-0.29, 0.39);
+    shield.quadraticCurveTo(0, 0.54, 0.29, 0.39);
+    shield.lineTo(0.25, -0.2);
+    shield.quadraticCurveTo(0.16, -0.39, 0, -0.5);
+    shield.quadraticCurveTo(-0.16, -0.39, -0.25, -0.2);
     shield.closePath();
-    k.shape(gold, shield, 0.1, [-0.91, 1.29, -0.46], k.group, 'metal');
-    const panel = k.shape(0x687c97, shield, 0.035, [-0.91, 1.29, -0.5], k.group, 'metal');
-    panel.scale.set(0.86, 0.86, 1);
-    k.box(silver, [-0.91, 1.3, -0.53], [0.075, 0.7, 0.035], k.group, 0.015, 'metal');
-    k.box(silver, [-0.91, 1.4, -0.53], [0.47, 0.075, 0.035], k.group, 0.015, 'metal');
-    bead(k, 0xbaa0dc, [-0.91, 1.4, -0.58], [0.09, 0.11, 0.045], 'eye');
-    k.shape(silver, profile([[-0.065, 0], [-0.085, 1.2], [0, 1.39], [0.085, 1.2], [0.065, 0]]), 0.055, [0.94, 1.18, -0.19], k.group, 'metal');
-    k.box(gold, [0.94, 1.21, -0.18], [0.39, 0.075, 0.12], k.group, 0.025, 'metal');
-    k.box(0x635164, [0.94, 1.02, -0.18], [0.09, 0.3, 0.09], k.group, 0.025, 'leather');
+    k.shape(gold, shield, 0.07, [-0.81, 1.29, -0.3], undefined, 'metal');
+    const inner = k.shape(0x61798f, shield, 0.02, [-0.81, 1.3, -0.33], undefined, 'metal');
+    inner.scale.set(0.85, 0.85, 1);
+    k.box(silver, [-0.81, 1.3, -0.36], [0.055, 0.63, 0.02], undefined, 0.014, 'metal');
+    k.box(silver, [-0.81, 1.39, -0.37], [0.37, 0.055, 0.02], undefined, 0.014, 'metal');
+    const shieldGrip = k.group.userData.grips[-1] as Vec3;
+    for (const part of k.group.children.slice(firstShieldPart))
+      part.position.add(new THREE.Vector3(shieldGrip[0] + 0.81, shieldGrip[1] - 1.2, shieldGrip[2] + 0.2));
+    const firstSwordPart = k.group.children.length;
+    k.sweep(
+      silver,
+      [
+        [0.83, 0.78, -0.12],
+        [0.83, 2.56, -0.12],
+        [0.83, 2.92, -0.12],
+      ],
+      [0.032, 0.04, 0],
+      [0.018, 0.022, 0],
+      undefined,
+      'metal',
+      24,
+    );
+    k.box(gold, [0.83, 1.08, -0.12], [0.27, 0.05, 0.08], undefined, 0.015, 'metal');
+    const swordGrip = k.group.userData.grips[1] as Vec3;
+    for (const part of k.group.children.slice(firstSwordPart))
+      part.position.add(new THREE.Vector3(swordGrip[0] - 0.83, 0, swordGrip[2] + 0.12));
   },
   skullKing(k) {
-    cape(k, 0x624b81, 0x9a78a8);
-    robe(k, 0x735789, 0.13, 2.17);
-    sleeves(k, 0x735789, bone, 1.76);
-    skull(k, 2.61);
-    crown(k, 3.15, gold);
-    staff(k, 1.06, 0xb497df, true);
-    for (const side of [-1, 1]) {
-      k.shape(gold, profile([[0, 0], [side * 0.29, -0.08], [side * 0.37, -1.76], [side * 0.21, -1.8]]), 0.025, [0, 1.99, -0.52], k.group, 'metal');
-      for (let i = 0; i < 4; i++) k.tube(bone, [[side * 0.06, 1.78 - i * 0.17, -0.535], [side * 0.2, 1.81 - i * 0.17, -0.49], [side * 0.33, 1.89 - i * 0.17, -0.43]], 0.038);
-    }
-    for (let i = 0; i < 9; i++) {
-      const a = (i / 8 - 0.5) * Math.PI;
-      bead(k, cream, [Math.sin(a) * 0.56, 2.05 - Math.cos(a) * 0.15, -Math.cos(a) * 0.44], [0.14, 0.12, 0.13]);
-    }
-    k.tube(gold, [[-0.34, 1.95, -0.45], [0, 1.69, -0.59], [0.34, 1.95, -0.45]], 0.026, k.group, 'metal');
-    bead(k, 0xb28ad3, [0, 1.69, -0.61], [0.1, 0.13, 0.055], 'eye');
-    for (let i = 0; i < 7; i++) bead(k, gold, [-0.42 + i * 0.14, 0.24, -Math.sqrt(0.65 ** 2 - (-0.42 + i * 0.14) ** 2)], [0.035, 0.045, 0.025], 'metal');
+    robe(k, 0x7b5f92, 2.03, 0.12, 0.65);
+    cape(k, 0x665078, 2.09, 0.82);
+    arms(k, 0x7b5f92, bone, 1.77, 0.45);
+    skullHead(k, 2.51, 1.05);
+    crown(k, 2.95, 0.39);
+    staff(k, 1.02, 0xab91d1, true);
+    collar(k, 0xb8a78c, 1.95);
+    for (const side of [-1, 1])
+      curve(
+        k,
+        gold,
+        [
+          [side * 0.2, 1.94, -0.28],
+          [side * 0.25, 1.2, -0.35],
+          [side * 0.5, 0.24, -0.38],
+        ],
+        0.025,
+        'metal',
+      );
+    for (const y of [1.7, 1.53, 1.36])
+      curve(
+        k,
+        bone,
+        [
+          [-0.23, y + 0.025, -0.29],
+          [0, y - 0.04, -0.36],
+          [0.23, y + 0.025, -0.29],
+        ],
+        0.025,
+      );
+    dot(k, 0xb39acc, [0, 1.94, -0.36], [0.075, 0.1, 0.035], 'eye');
   },
 };
-
 export function createBossModel(id: string): THREE.Group {
   const build = builders[id];
   if (!build) throw new Error(`Unknown boss model: ${id}`);
-  const kit = new ModelKit(1.35);
+  const kit = new SculptKit();
   kit.group.name = id;
   build(kit);
-  // One merged mesh per material means the existing fade and dispose each touch it once.
-  return bakeStaticModel(kit.group);
+  const model = bakeStaticModel(kit.group);
+  // Relaxed, asymmetric rest poses retain feet/attack pivots, while avoiding a rigid toy stance.
+  const tilts: Record<string, number> = {
+    ghostTeacher: -0.055,
+    ghostGirl: 0.045,
+    giantZombie: -0.025,
+    zombieKing: 0.04,
+    lightningGolem: -0.02,
+    frankenstein: 0.03,
+    seaWitch: -0.055,
+    werewolfChief: 0.04,
+    dracula: -0.045,
+    skeletonKnight: 0.025,
+    skullKing: -0.035,
+  };
+  const tilt = tilts[id] ?? 0;
+  if (tilt)
+    model.traverse((o) => {
+      if (!(o instanceof THREE.Mesh)) return;
+      const positions = o.geometry.getAttribute('position');
+      for (let i = 0; i < positions.count; i++) {
+        let x = positions.getX(i),
+          y = positions.getY(i),
+          z = positions.getZ(i);
+        const upper = THREE.MathUtils.smoothstep(y, 1.8, 2.4),
+          angle = tilt * upper;
+        const dx = x,
+          dy = y - 2.02;
+        x = dx * Math.cos(angle) - dy * Math.sin(angle);
+        y = 2.02 + dx * Math.sin(angle) + dy * Math.cos(angle);
+        x += Math.sin(Math.max(0, Math.min(1, y / 3.2)) * Math.PI) * tilt * 1.4;
+        z +=
+          0.035 * Math.sin((y * Math.PI) / 2) +
+          (x > 0 ? 0.045 : -0.045) * (1 - THREE.MathUtils.smoothstep(y, 0.35, 0.85));
+        positions.setXYZ(i, x, y, z);
+      }
+      const old = o.geometry;
+      old.deleteAttribute('normal');
+      o.geometry = mergeVertices(old, 1e-5);
+      o.geometry.computeVertexNormals();
+      old.dispose();
+      o.geometry.computeBoundingBox();
+      o.geometry.computeBoundingSphere();
+    });
+  return model;
 }
