@@ -1,3 +1,5 @@
+import { loadAllCreatureWorlds } from '../visual/CreatureRegistry';
+await loadAllCreatureWorlds();
 import { describe, expect, it, vi } from 'vitest';
 import * as THREE from 'three';
 import { Boss } from './Boss';

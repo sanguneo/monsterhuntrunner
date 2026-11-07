@@ -4,6 +4,7 @@ import { defineConfig } from 'vitest/config';
 // dev는 루트('/'), build는 저장소 경로로 base 설정.
 export default defineConfig(({ command }) => ({
   base: command === 'build' ? '/monsterhuntrunner/' : '/',
+  build: { manifest: true },
   test: {
     include: ['src/**/*.test.ts'],
     environment: 'node',

@@ -1,0 +1,1 @@
+import {buildZombieBoss}from '../../src/visual/creatures/v2/zombie';import{buildLabBoss}from '../../src/visual/creatures/v2/lab';for(const id of ['giantZombie','zombieKing','lightningGolem','frankenstein']){try{console.log(id,!!(buildZombieBoss(id)??buildLabBoss(id)));}catch(e){console.log(id,String(e));}}

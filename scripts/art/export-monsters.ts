@@ -1,3 +1,5 @@
+import './preload-all-creature-themes';
+import './export-texture-support';
 import * as THREE from 'three';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
 import { mkdirSync, writeFileSync } from 'node:fs';
