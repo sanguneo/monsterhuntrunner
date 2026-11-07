@@ -103,13 +103,17 @@ export class Boss {
     this.bodyGroup.updateMatrixWorld(true);
     this.bodyGroup.traverse((node) => {
       if (!(node instanceof THREE.Mesh)) return;
-      const geometry = node.geometry.clone();
-      geometry.deleteAttribute('color'); // Outline has one uniform warning color.
+      const geometry = node.geometry.index ? node.geometry.toNonIndexed() : node.geometry.clone();
+      // Uniform MeshBasic outline needs positions only. Authored body batches may carry
+      // different UV/tangent/color attributes; merging those optional sets returned null.
+      for (const attribute of Object.keys(geometry.attributes))
+        if (attribute !== 'position') geometry.deleteAttribute(attribute);
       geometry.applyMatrix4(node.matrixWorld);
       outlineParts.push(geometry);
     });
-    const outGeo = mergeGeometries(outlineParts)!;
+    const outGeo = mergeGeometries(outlineParts);
     outlineParts.forEach((geometry) => geometry.dispose());
+    if (!outGeo) throw new Error(`Could not build authored boss warning outline: ${def.id}`);
     const outMat = new THREE.MeshBasicMaterial({
       color: 0xff2222,
       side: THREE.BackSide,

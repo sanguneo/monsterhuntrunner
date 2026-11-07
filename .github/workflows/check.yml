@@ -24,6 +24,7 @@ jobs:
       - run: pnpm build
       - run: pnpm art:export
       - run: pnpm art:validate
+      - run: pnpm art:textures
       - run: python3 scripts/art/test-validator.py
       - run: pnpm art:qa
       - name: Keep measured mesh and character QA reports

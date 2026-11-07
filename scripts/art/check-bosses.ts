@@ -1,3 +1,4 @@
+import './preload-all-creature-themes';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { createBossModel } from '../../src/visual/BossModels';
@@ -22,7 +23,10 @@ for (const def of WORLDS.flatMap((w) => [w.midBoss, w.finalBoss])) {
   const box = new THREE.Box3().setFromObject(body),
     size = box.getSize(new THREE.Vector3());
   assert(box.min.y >= -0.025, `${def.id}: feet below authored pivot`);
-  assert(size.y >= 2.5 && size.y <= 3.6, `${def.id}: unexpected height ${size.y}`);
+  // Same authored Kraken-only low-sprawl envelope as CreatureRevision.test.ts.
+  const minHeight = def.id === 'kraken' ? 2.1 : 2.5;
+  const maxHeight = def.id === 'kraken' ? 2.3 : 3.6;
+  assert(size.y >= minHeight && size.y <= maxHeight, `${def.id}: unexpected height ${size.y}`);
   assert(size.x <= 2.9 && size.z <= 2.2, `${def.id}: unexpected gameplay footprint`);
   console.log(
     `${def.id}: ${triangles} triangles, ${draws} batches, finite geometry, ${size
@@ -31,4 +35,4 @@ for (const def of WORLDS.flatMap((w) => [w.midBoss, w.finalBoss])) {
       .join(' × ')}`,
   );
 }
-assert.throws(() => createBossModel('missing-id'), /Unknown boss model/);
+assert.throws(() => createBossModel('missing-id'), /Unknown creature identity/);

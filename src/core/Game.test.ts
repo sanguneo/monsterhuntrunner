@@ -1,3 +1,5 @@
+import { loadAllCreatureWorlds } from '../visual/CreatureRegistry';
+await loadAllCreatureWorlds();
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as THREE from 'three';
 import { Game } from './Game';

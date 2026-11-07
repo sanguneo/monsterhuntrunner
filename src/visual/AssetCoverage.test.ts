@@ -1,3 +1,5 @@
+import { loadAllCreatureWorlds } from './CreatureRegistry';
+await loadAllCreatureWorlds();
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { WORLDS } from '../data/worlds';
@@ -34,7 +36,7 @@ describe('complete authored visual coverage', () => {
     for (const def of WORLDS.flatMap((w) => w.monsters)) {
       const model = createMonsterModel(def);
       const report = inspect(model);
-      expect(report.triangles).toBeLessThanOrEqual(6000);
+      expect(report.triangles, `${def.id} triangle budget`).toBeLessThanOrEqual(6000);
       expect(report.draws).toBeLessThanOrEqual(12);
       const box = new THREE.Box3().setFromObject(model);
       expect(box.min.y).toBeGreaterThan(-0.7);

@@ -1,3 +1,6 @@
+import { preloadCreatureWorld, isCreatureWorldReady } from '../visual/CreaturePreload';
+import { WorldAssetGate } from '../visual/WorldAssetGate';
+import { showWorldAssetLoading, hideWorldAssetLoading } from '../ui/WorldAssetLoading';
 // ============================================================
 // Game — 상태머신 + 고정 타임스텝 게임루프 (§15)
 // TITLE → (TUTORIAL) → RUNNING_1 → MIDBOSS → RUNNING_2 →
@@ -90,6 +93,8 @@ export class Game {
   stats = { kills: 0, bossKills: 0 };
   /** 현재 선택/플레이 중인 월드 (0~5) */
   worldIdx = 0;
+  private assetLoading = false;
+  private worldAssetGate?: WorldAssetGate;
 
   private runElapsed = 0;
   private segmentStart = 0;
@@ -182,7 +187,7 @@ export class Game {
       const frameDt = Math.min((now - this.lastTime) / 1000, 0.1);
       this.lastTime = now;
       // 고정 타임스텝 업데이트 (§3.1)
-      if (!this.paused) {
+      if (!this.paused && !this.assetLoading) {
         this.accumulator += frameDt;
         while (this.accumulator >= this.STEP) {
           this.update(this.STEP);
@@ -247,13 +252,37 @@ export class Game {
     }
   }
 
+  private withWorldAssets(idx: number, commit: () => void): void {
+    if (!Number.isInteger(idx) || idx < 0 || idx >= WORLDS.length) return;
+    this.worldAssetGate ??= new WorldAssetGate(isCreatureWorldReady, preloadCreatureWorld);
+    this.worldAssetGate.enter(WORLDS[idx].id, commit, {
+      loading: () => {
+        this.assetLoading = true;
+        this.input.clear();
+        this.player.clearActions();
+        showWorldAssetLoading(() => this.toTitle());
+      },
+      done: () => {
+        this.assetLoading = false;
+        hideWorldAssetLoading();
+      },
+      failed: (error, retry) => {
+        console.error('World assets failed to load', error);
+        // Old world/state remains unchanged. No factory runs against missing assets.
+        this.assetLoading = true;
+        showWorldAssetLoading(() => this.toTitle(), retry);
+      },
+    });
+  }
+
   selectWorld(idx: number): void {
-    if (idx <= this.unlockedWorldIdx()) {
-      this.worldIdx = idx;
-      this.applyWorldTheme();
-      this.screens.preloadWorld(idx); // 선택 월드 인트로/보상 이미지 지연 로드
-      this.screens.showTitle();
-    }
+    if (idx <= this.unlockedWorldIdx())
+      this.withWorldAssets(idx, () => {
+        this.worldIdx = idx;
+        this.applyWorldTheme();
+        this.screens.preloadWorld(idx);
+        this.screens.showTitle();
+      });
   }
 
   private applyWorldTheme(): void {
@@ -280,7 +309,12 @@ export class Game {
 
   /** 스킬 사용 가능 여부 — 튜토리얼은 스킬 단계부터 */
   get skillsEnabled(): boolean {
-    return !this.paused && this.stageIntroTimer <= 0 && (this.isRunningState || this.isBossState || this.inTutorial);
+    return (
+      !this.paused &&
+      !this.assetLoading &&
+      this.stageIntroTimer <= 0 &&
+      (this.isRunningState || this.isBossState || this.inTutorial)
+    );
   }
 
   segmentProgress(): number {
@@ -585,34 +619,38 @@ export class Game {
 
   /** 타이틀 시작: 첫 진입이면 튜토리얼, 이미 봤으면 본편 (§14.3) */
   startRun(forceTutorial: boolean): void {
-    this.resetRun();
-    const seen = sessionStorage.getItem(CONFIG.tutorial.seenFlagKey);
-    if (forceTutorial || (!seen && CONFIG.tutorial.enabled)) {
-      this.setState('TUTORIAL');
-    } else {
-      this.setState('RUNNING_1');
-    }
+    this.withWorldAssets(this.worldIdx, () => {
+      this.resetRun();
+      const seen = sessionStorage.getItem(CONFIG.tutorial.seenFlagKey);
+      if (forceTutorial || (!seen && CONFIG.tutorial.enabled)) this.setState('TUTORIAL');
+      else this.setState('RUNNING_1');
+    });
   }
 
   restartRun(): void {
-    this.resetRun();
     this.startRun(false);
   }
 
-  /** 결과 화면에서 다음 월드로 바로 진행 */
+  /** The next world is committed only after its own chunk/templates are ready. */
   startNextWorld(): void {
-    if (this.worldIdx < WORLDS.length - 1) {
-      this.worldIdx += 1;
-      this.resetRun();
-      this.setState('RUNNING_1');
-    }
+    const idx = this.worldIdx + 1;
+    if (idx < WORLDS.length)
+      this.withWorldAssets(idx, () => {
+        this.worldIdx = idx;
+        this.resetRun();
+        this.setState('RUNNING_1');
+      });
   }
 
   toTitle(): void {
+    this.worldAssetGate?.cancel();
+    this.assetLoading = false;
+    hideWorldAssetLoading();
     this.setState('TITLE');
   }
 
   togglePause(): void {
+    if (this.assetLoading) return;
     if (!this.isPlayState) return;
     if (this.stageIntroTimer > 0) {
       this.dismissStageIntro(); // 인트로 중 일시정지 입력 = 인트로 종료

@@ -1,0 +1,42 @@
+{
+  "repository": "makehumancommunity/makehuman",
+  "use": "Optional adult anatomical morph data, CC0 graphical assets only; named source targets do not imply a character ethnicity. Blend/selection must be documented by the character author.",
+  "files": [
+    {
+      "name": "african-female-young.target",
+      "path": "makehuman/data/targets/macrodetails/african-female-young.target",
+      "gitBlob": "a7d2b130667cc81ecd1ca0598da9be27bec1864a",
+      "bytes": 411735
+    },
+    {
+      "name": "african-male-young.target",
+      "path": "makehuman/data/targets/macrodetails/african-male-young.target",
+      "gitBlob": "dd5743e48700267d76596f575bf17b4b5cc3b3e0",
+      "bytes": 406170
+    },
+    {
+      "name": "asian-female-young.target",
+      "path": "makehuman/data/targets/macrodetails/asian-female-young.target",
+      "gitBlob": "f862c96add11c31ab1ca75c69e1c67ae5e0e3d5f",
+      "bytes": 435553
+    },
+    {
+      "name": "asian-male-young.target",
+      "path": "makehuman/data/targets/macrodetails/asian-male-young.target",
+      "gitBlob": "8cd3ef3e9ddb06ee2d166f75f9ac10871251f938",
+      "bytes": 421040
+    },
+    {
+      "name": "caucasian-female-young.target",
+      "path": "makehuman/data/targets/macrodetails/caucasian-female-young.target",
+      "gitBlob": "9d1f0cbeedc9a6a51abe33f1ebb5fa7c5a7edbf1",
+      "bytes": 420559
+    },
+    {
+      "name": "caucasian-male-young.target",
+      "path": "makehuman/data/targets/macrodetails/caucasian-male-young.target",
+      "gitBlob": "c3b82f92c5ced85599199cd184b0faf3b3fc6881",
+      "bytes": 396479
+    }
+  ]
+}
